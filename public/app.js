@@ -1106,6 +1106,58 @@ function renderSplitsList() {
     card.className = 'split-card';
     card.dataset.index = idx;
     
+    // Default fallback states
+    const expStatus = s.exportStatus || 'idle';
+    const uplStatus = s.uploadStatus || 'idle';
+    
+    // Status text & colors
+    let exportBadgeHtml = '';
+    if (expStatus === 'processing') {
+      exportBadgeHtml = `<span class="split-badge processing">🔄 Cutting...</span>`;
+    } else if (expStatus === 'completed') {
+      exportBadgeHtml = `<span class="split-badge completed">✅ Exported</span>`;
+    } else if (expStatus === 'failed') {
+      exportBadgeHtml = `<span class="split-badge failed">❌ Failed</span>`;
+    }
+    
+    let uploadBadgeHtml = '';
+    let uploadActionHtml = '';
+    
+    if (expStatus === 'completed') {
+      if (uplStatus === 'completed') {
+        uploadBadgeHtml = `<span class="split-badge completed">✅ YouTube Live</span>`;
+        uploadActionHtml = `<a href="${s.youtubeUrl}" target="_blank" class="split-yt-link">🎬 View on YouTube</a>`;
+      } else if (uplStatus === 'processing') {
+        uploadBadgeHtml = `<span class="split-badge processing">⏳ Uploading...</span>`;
+      } else if (uplStatus === 'queued') {
+        uploadBadgeHtml = `<span class="split-badge queued">⏳ Queued...</span>`;
+      } else if (uplStatus === 'failed') {
+        uploadBadgeHtml = `<span class="split-badge failed">❌ Upload Failed</span>`;
+        uploadActionHtml = `<button class="btn-upload-split btn-retry-upload" title="Retry Upload to YouTube">🔄 Retry Upload</button>`;
+      } else {
+        uploadActionHtml = `<button class="btn-upload-split btn-start-upload" title="Upload to YouTube">📤 Upload to YouTube</button>`;
+      }
+    }
+
+    const showStatusContainer = expStatus !== 'idle';
+    const statusContainerHtml = showStatusContainer ? `
+      <div class="split-status-container">
+        <div class="status-badge-row">
+          <span class="status-label">Export:</span>
+          ${exportBadgeHtml}
+        </div>
+        <div class="status-badge-row">
+          <span class="status-label">YouTube:</span>
+          ${uploadBadgeHtml || '<span class="split-badge idle">Idle</span>'}
+        </div>
+        ${uploadActionHtml ? `
+        <div class="status-badge-row" style="margin-top: 4px; justify-content: flex-end;">
+          ${uploadActionHtml}
+        </div>
+        ` : ''}
+      </div>
+    ` : '';
+
     card.innerHTML = `
       <div class="split-card-header">
         <span class="split-card-title">🏸 Game ${idx + 1}</span>
@@ -1122,6 +1174,8 @@ function renderSplitsList() {
         
         <input type="text" class="score-input" placeholder="Score (e.g. 21-19)" value="${s.score}">
       </div>
+      
+      ${statusContainerHtml}
       
       <div class="split-card-actions">
         <div class="split-card-btn-grp">
@@ -1154,6 +1208,57 @@ function renderSplitsList() {
       drawTimelineCanvas();
       logToConsole(`[SYSTEM] Deleted split ${idx + 1}`, 'info');
     });
+
+    // Hook manual upload trigger
+    const uploadBtn = card.querySelector('.btn-start-upload') || card.querySelector('.btn-retry-upload');
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading...';
+        s.uploadStatus = 'processing';
+        renderSplitsList();
+        
+        logToConsole(`\n[YOUTUBE] Triggering manual upload for Game ${idx + 1}...`, 'info');
+        showBannerNotification(`📤 Starting YouTube upload for Game ${idx + 1}...`);
+
+        const payload = {
+          dirPath: state.dirPath,
+          splitIndex: idx,
+          youtubeSettings: {
+            playlistId: state.youtubeSettings.playlistMode === 'select' ? state.youtubeSettings.playlistId : null,
+            privacy: state.youtubeSettings.privacy || 'unlisted',
+            defaultDesc: state.youtubeSettings.defaultDesc
+          }
+        };
+
+        try {
+          const response = await fetch('/api/upload-single', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await response.ok ? await response.json() : null;
+          if (data && data.success) {
+            logToConsole(`✓ [YOUTUBE] Game ${idx + 1} successfully uploaded manually! URL: ${data.url}`, 'success');
+            showBannerNotification(`🎥 YouTube Live: Game ${idx + 1} uploaded successfully!`);
+            s.uploadStatus = 'completed';
+            s.youtubeUrl = data.url;
+            s.youtubeId = data.youtubeId;
+          } else {
+            const errData = response.status !== 200 ? await response.json().catch(()=>({})) : {};
+            throw new Error((errData && errData.error) || 'Upload request failed');
+          }
+        } catch (err) {
+          logToConsole(`⚠️ [YOUTUBE ERROR] Manual upload failed for Game ${idx + 1}: ${err.message}`, 'error');
+          showBannerNotification(`❌ YouTube Upload Failed for Game ${idx + 1}`);
+          s.uploadStatus = 'failed';
+        } finally {
+          renderSplitsList();
+        }
+      });
+    }
 
     elements.splitsListViewport.appendChild(card);
   });
@@ -1329,6 +1434,12 @@ function handleExportProgressChunk(data) {
       // Compute percentage
       const startPct = Math.round((data.gameIndex / state.splits.length) * 100);
       updateExportProgress(startPct, `Processing game ${data.gameIndex + 1}/${state.splits.length}...`);
+      
+      // Update local state!
+      if (state.splits[data.gameIndex]) {
+        state.splits[data.gameIndex].exportStatus = 'processing';
+        renderSplitsList();
+      }
       break;
       
     case 'game_complete':
@@ -1339,19 +1450,43 @@ function handleExportProgressChunk(data) {
       
       const completePct = Math.round(((data.gameIndex + 1) / state.splits.length) * 100);
       updateExportProgress(completePct, `Game ${data.gameIndex + 1} done.`);
+      
+      // Update local state!
+      if (state.splits[data.gameIndex]) {
+        state.splits[data.gameIndex].exportStatus = 'completed';
+        state.splits[data.gameIndex].videoPath = data.outputPath;
+        renderSplitsList();
+      }
       break;
 
     case 'upload_start':
       logToConsole(`🚀 [YOUTUBE] ${data.message}`, 'info');
+      // Update local state!
+      if (state.splits[data.gameIndex]) {
+        state.splits[data.gameIndex].uploadStatus = 'processing';
+        renderSplitsList();
+      }
       break;
 
     case 'upload_complete':
       logToConsole(`✓ [YOUTUBE] ${data.message}`, 'success');
       showBannerNotification(`🎥 YouTube Live: ${data.message}`);
+      // Update local state!
+      if (state.splits[data.gameIndex]) {
+        state.splits[data.gameIndex].uploadStatus = 'completed';
+        state.splits[data.gameIndex].youtubeUrl = data.url;
+        state.splits[data.gameIndex].youtubeId = data.youtubeId;
+        renderSplitsList();
+      }
       break;
 
     case 'upload_error':
       logToConsole(`⚠️ [YOUTUBE ERROR] ${data.message}`, 'error');
+      // Update local state!
+      if (state.splits[data.gameIndex]) {
+        state.splits[data.gameIndex].uploadStatus = 'failed';
+        renderSplitsList();
+      }
       break;
 
     case 'info':

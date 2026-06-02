@@ -847,10 +847,119 @@ body {
   color: var(--color-accent);
 }
 
-.splits-footer {
-  padding: 15px 20px;
-  border-top: 1px solid var(--border-color);
-  flex-shrink: 0;
+/* Split Card Status Badges */
+.split-status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 2px;
+}
+
+.status-badge-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.status-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.split-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Status variants */
+.split-badge.idle {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.split-badge.processing,
+.split-badge.queued {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60A5FA;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  animation: pulse-glow 1.5s infinite;
+}
+
+.split-badge.completed {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-primary);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  box-shadow: var(--shadow-primary-glow);
+}
+
+.split-badge.failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-accent);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0% { opacity: 0.8; box-shadow: 0 0 2px rgba(59, 130, 246, 0.2); }
+  50% { opacity: 1; box-shadow: 0 0 8px rgba(59, 130, 246, 0.5); }
+  100% { opacity: 0.8; box-shadow: 0 0 2px rgba(59, 130, 246, 0.2); }
+}
+
+/* Card buttons & links */
+.split-yt-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition);
+}
+
+.split-yt-link:hover {
+  color: var(--color-primary-glow);
+  text-shadow: var(--shadow-primary-glow);
+}
+
+.btn-upload-split {
+  background: transparent;
+  border: 1px solid #FF0055;
+  color: #FF0055;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition);
+}
+
+.btn-upload-split:hover {
+  background: rgba(255, 0, 85, 0.1);
+  box-shadow: 0 0 8px rgba(255, 0, 85, 0.3);
+}
+
+.btn-upload-split:disabled {
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* ==========================================================================

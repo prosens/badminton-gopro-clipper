@@ -235,6 +235,44 @@ app.post('/api/scan', async (req, res) => {
       try {
         const fileContent = fs.readFileSync(projectFilePath, 'utf8');
         projectSession = JSON.parse(fileContent);
+
+        // Self-heal and auto-detect existing video files on disk
+        const outputDir = path.join(resolvedPath, 'exported_games');
+        if (projectSession && projectSession.splits) {
+          let mutated = false;
+          projectSession.splits.forEach(split => {
+            // Ensure properties exist
+            if (!split.exportStatus) { split.exportStatus = 'idle'; mutated = true; }
+            if (!split.uploadStatus) { split.uploadStatus = 'idle'; mutated = true; }
+            if (split.videoPath === undefined) { split.videoPath = ''; mutated = true; }
+            if (split.youtubeUrl === undefined) { split.youtubeUrl = ''; mutated = true; }
+            if (split.youtubeId === undefined) { split.youtubeId = ''; mutated = true; }
+
+            const teamANames = sanitizeFilename(split.teamA, 'Team A');
+            const teamBNames = sanitizeFilename(split.teamB, 'Team B');
+            const score = sanitizeFilename(split.score, 'Score');
+            const cleanFilename = `${teamANames} vs ${teamBNames} (${score}).mp4`;
+            const expectedPath = path.join(outputDir, cleanFilename);
+
+            if (fs.existsSync(expectedPath)) {
+              if (split.exportStatus !== 'completed') {
+                split.exportStatus = 'completed';
+                split.videoPath = expectedPath;
+                mutated = true;
+              }
+            } else {
+              if (split.exportStatus === 'completed') {
+                split.exportStatus = 'idle';
+                split.videoPath = '';
+                mutated = true;
+              }
+            }
+          });
+
+          if (mutated) {
+            fs.writeFileSync(projectFilePath, JSON.stringify(projectSession, null, 2), 'utf8');
+          }
+        }
       } catch (err) {
         console.error('Error loading saved session file:', err.message);
       }
@@ -356,6 +394,27 @@ function spawnPromise(command, args, onLog) {
 }
 
 /**
+ * Helper to save project session metadata directly to disk
+ */
+function saveSessionStateDirectly(dirPath, splits, youtubeSettings) {
+  try {
+    const resolvedPath = path.resolve(dirPath);
+    const projectFilePath = path.join(resolvedPath, 'badminton_session.json');
+    let currentSession = {};
+    if (fs.existsSync(projectFilePath)) {
+      try {
+        currentSession = JSON.parse(fs.readFileSync(projectFilePath, 'utf8'));
+      } catch (_) {}
+    }
+    if (splits) currentSession.splits = splits;
+    if (youtubeSettings) currentSession.youtubeSettings = youtubeSettings;
+    fs.writeFileSync(projectFilePath, JSON.stringify(currentSession, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[SYSTEM ERROR] Failed to save session state directly:', err.message);
+  }
+}
+
+/**
  * Endpoint to export games (performs lossless cuts and joins using ffmpeg)
  * Uses HTTP chunked transfer to write progress back to the client in real-time
  */
@@ -417,163 +476,202 @@ app.post('/api/export', async (req, res) => {
       const cleanFilename = `${teamANames} vs ${teamBNames} (${score}).mp4`;
       const finalOutputPath = path.join(outputDir, cleanFilename);
 
+      // Ensure properties exist on this split
+      if (!split.exportStatus) split.exportStatus = 'idle';
+      if (!split.uploadStatus) split.uploadStatus = 'idle';
+      if (split.videoPath === undefined) split.videoPath = '';
+      if (split.youtubeUrl === undefined) split.youtubeUrl = '';
+      if (split.youtubeId === undefined) split.youtubeId = '';
+
       sendProgress({ 
         status: 'game_start', 
         gameIndex: index, 
         message: `Processing Game ${gameNum}/${splits.length}: "${gameTitle}"...` 
       });
 
-      const startSec = split.start;
-      const endSec = split.end;
-      const totalDuration = endSec - startSec;
-
-      if (totalDuration <= 0) {
-        sendProgress({ status: 'warning', message: `Skipping Game ${gameNum}: Invalid duration (${totalDuration}s)` });
-        continue;
-      }
-
-      // 1. Identify which physical files intersect with [startSec, endSec]
-      const intersectingFiles = [];
-      for (const f of filesWithBoundaries) {
-        // Check overlap
-        const overlapStart = Math.max(f.globalStart, startSec);
-        const overlapEnd = Math.min(f.globalEnd, endSec);
+      // CHECK RESUMPTION:
+      const alreadyExported = split.exportStatus === 'completed' && fs.existsSync(finalOutputPath);
+      if (alreadyExported) {
+        sendProgress({ 
+          status: 'info', 
+          message: `Game ${gameNum} already exported (file exists). Skipping FFmpeg cutting/stitching.` 
+        });
         
-        if (overlapEnd > overlapStart) {
-          intersectingFiles.push({
-            file: f,
-            overlapStart: overlapStart,
-            overlapEnd: overlapEnd,
-            relativeStart: overlapStart - f.globalStart,
-            duration: overlapEnd - overlapStart
-          });
+        split.exportStatus = 'completed';
+        split.videoPath = finalOutputPath;
+        saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+
+        sendProgress({ 
+          status: 'game_complete', 
+          gameIndex: index, 
+          message: `Skipped Game ${gameNum}: Already exported at "exported_games/${cleanFilename}"`,
+          outputPath: finalOutputPath,
+          filename: cleanFilename
+        });
+      } else {
+        // Not already exported! Perform the cut.
+        const startSec = split.start;
+        const endSec = split.end;
+        const totalDuration = endSec - startSec;
+
+        if (totalDuration <= 0) {
+          sendProgress({ status: 'warning', message: `Skipping Game ${gameNum}: Invalid duration (${totalDuration}s)` });
+          continue;
         }
-      }
 
-      if (intersectingFiles.length === 0) {
-        sendProgress({ status: 'warning', message: `Skipping Game ${gameNum}: Could not map global time to physical files.` });
-        continue;
-      }
+        split.exportStatus = 'processing';
+        split.videoPath = '';
+        saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
 
-      sendProgress({ 
-        status: 'info', 
-        message: `Game spans across ${intersectingFiles.length} file(s).` 
-      });
+        // 1. Identify which physical files intersect with [startSec, endSec]
+        const intersectingFiles = [];
+        for (const f of filesWithBoundaries) {
+          const overlapStart = Math.max(f.globalStart, startSec);
+          const overlapEnd = Math.min(f.globalEnd, endSec);
+          if (overlapEnd > overlapStart) {
+            intersectingFiles.push({
+              file: f,
+              overlapStart: overlapStart,
+              overlapEnd: overlapEnd,
+              relativeStart: overlapStart - f.globalStart,
+              duration: overlapEnd - overlapStart
+            });
+          }
+        }
 
-      // 2. Perform cuts
-      const tempPartPaths = [];
-
-      for (let i = 0; i < intersectingFiles.length; i++) {
-        const item = intersectingFiles[i];
-        const tempPartName = `temp_game_${gameNum}_part_${i + 1}.mp4`;
-        const tempPartPath = path.join(tempDir, tempPartName);
+        if (intersectingFiles.length === 0) {
+          sendProgress({ status: 'warning', message: `Skipping Game ${gameNum}: Could not map global time to physical files.` });
+          split.exportStatus = 'failed';
+          saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+          continue;
+        }
 
         sendProgress({ 
           status: 'info', 
-          message: `Cutting part ${i+1}/${intersectingFiles.length} from file ${item.file.name} (Start: ${item.relativeStart.toFixed(1)}s, Dur: ${item.duration.toFixed(1)}s)...` 
+          message: `Game spans across ${intersectingFiles.length} file(s).` 
         });
 
-        // lossless cut command: ffmpeg -y -ss <start> -t <duration> -i <input> -c copy -map 0 -avoid_negative_ts make_zero <output>
-        // Note: For precise cuts, put -ss before -i. With -c copy, it will cut at the closest keyframe.
-        const args = [
-          '-y',
-          '-ss', item.relativeStart.toString(),
-          '-t', item.duration.toString(),
-          '-i', item.file.path,
-          '-c', 'copy',
-          '-map', '0:v',
-          '-map', '0:a?',
-          '-avoid_negative_ts', 'make_zero',
-          tempPartPath
-        ];
+        const tempPartPaths = [];
+        let cutError = null;
 
-        try {
-          await spawnPromise('ffmpeg', args, (log) => {
-            // Can parse ffmpeg stdout/stderr here if we want detailed percent-complete
+        for (let i = 0; i < intersectingFiles.length; i++) {
+          const item = intersectingFiles[i];
+          const tempPartName = `temp_game_${gameNum}_part_${i + 1}.mp4`;
+          const tempPartPath = path.join(tempDir, tempPartName);
+
+          sendProgress({ 
+            status: 'info', 
+            message: `Cutting part ${i+1}/${intersectingFiles.length} from file ${item.file.name} (Start: ${item.relativeStart.toFixed(1)}s, Dur: ${item.duration.toFixed(1)}s)...` 
           });
-          tempPartPaths.push(tempPartPath);
-        } catch (err) {
-          sendProgress({ status: 'error', message: `FFmpeg cut failed for part ${i+1}: ${err.message}` });
-          throw err;
-        }
-      }
 
-      // 3. Join parts if there are multiple, or just rename if single
-      if (tempPartPaths.length === 1) {
-        sendProgress({ status: 'info', message: `Single part cut. Finalizing video...` });
-        try {
-          if (fs.existsSync(finalOutputPath)) {
-            fs.unlinkSync(finalOutputPath);
-          }
-          fs.renameSync(tempPartPaths[0], finalOutputPath);
-        } catch (err) {
-          sendProgress({ status: 'error', message: `Failed to finalize file: ${err.message}` });
-          throw err;
-        }
-      } else {
-        sendProgress({ status: 'info', message: `Stitching ${tempPartPaths.length} parts together losslessly...` });
-        
-        // Write the list file for concat demuxer
-        const listFilePath = path.join(tempDir, `concat_list_game_${gameNum}.txt`);
-        const listContent = tempPartPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
-        fs.writeFileSync(listFilePath, listContent, 'utf8');
+          const args = [
+            '-y',
+            '-ss', item.relativeStart.toString(),
+            '-t', item.duration.toString(),
+            '-i', item.file.path,
+            '-c', 'copy',
+            '-map', '0:v',
+            '-map', '0:a?',
+            '-avoid_negative_ts', 'make_zero',
+            tempPartPath
+          ];
 
-        // Safe temporary output filename for FFmpeg to avoid special character limitations
-        const tempConcatOutName = `temp_stitch_out_game_${gameNum}.mp4`;
-        const tempConcatOutPath = path.join(tempDir, tempConcatOutName);
-
-        // Run concat demuxer: ffmpeg -y -f concat -safe 0 -i list.txt -c copy output.mp4
-        const args = [
-          '-y',
-          '-f', 'concat',
-          '-safe', '0',
-          '-i', listFilePath,
-          '-c', 'copy',
-          tempConcatOutPath
-        ];
-
-        try {
-          await spawnPromise('ffmpeg', args, (log) => {});
-          sendProgress({ status: 'info', message: `Stitch completed successfully. Finalizing video...` });
-
-          // Rename the temp stitched file to the final output name
-          if (fs.existsSync(finalOutputPath)) {
-            fs.unlinkSync(finalOutputPath);
-          }
-          fs.renameSync(tempConcatOutPath, finalOutputPath);
-        } catch (err) {
-          sendProgress({ status: 'error', message: `FFmpeg concatenation failed: ${err.message}` });
-          // Cleanup temp output if it exists and failed
-          if (fs.existsSync(tempConcatOutPath)) {
-            try { fs.unlinkSync(tempConcatOutPath); } catch(_) {}
-          }
-          throw err;
-        } finally {
-          // Cleanup parts & list file
           try {
-            tempPartPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
-            if (fs.existsSync(listFilePath)) fs.unlinkSync(listFilePath);
-          } catch (cleanErr) {
-            console.error('Error cleaning up temp parts:', cleanErr);
+            await spawnPromise('ffmpeg', args, () => {});
+            tempPartPaths.push(tempPartPath);
+          } catch (err) {
+            cutError = err;
+            break;
           }
         }
-      }
 
-      sendProgress({ 
-        status: 'game_complete', 
-        gameIndex: index, 
-        message: `Completed Game ${gameNum}: Successfully exported to "exported_games/${cleanFilename}"`,
-        outputPath: finalOutputPath,
-        filename: cleanFilename
-      });
+        if (cutError) {
+          sendProgress({ status: 'error', message: `FFmpeg cut failed: ${cutError.message}` });
+          split.exportStatus = 'failed';
+          saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+          continue;
+        }
+
+        // 3. Join parts if there are multiple, or just rename if single
+        try {
+          if (tempPartPaths.length === 1) {
+            sendProgress({ status: 'info', message: `Single part cut. Finalizing video...` });
+            if (fs.existsSync(finalOutputPath)) {
+              fs.unlinkSync(finalOutputPath);
+            }
+            fs.renameSync(tempPartPaths[0], finalOutputPath);
+          } else {
+            sendProgress({ status: 'info', message: `Stitching ${tempPartPaths.length} parts together losslessly...` });
+            const listFilePath = path.join(tempDir, `concat_list_game_${gameNum}.txt`);
+            const listContent = tempPartPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+            fs.writeFileSync(listFilePath, listContent, 'utf8');
+
+            const tempConcatOutName = `temp_stitch_out_game_${gameNum}.mp4`;
+            const tempConcatOutPath = path.join(tempDir, tempConcatOutName);
+
+            const args = [
+              '-y',
+              '-f', 'concat',
+              '-safe', '0',
+              '-i', listFilePath,
+              '-c', 'copy',
+              tempConcatOutPath
+            ];
+
+            try {
+              await spawnPromise('ffmpeg', args, () => {});
+              sendProgress({ status: 'info', message: `Stitch completed successfully. Finalizing video...` });
+              if (fs.existsSync(finalOutputPath)) {
+                fs.unlinkSync(finalOutputPath);
+              }
+              fs.renameSync(tempConcatOutPath, finalOutputPath);
+            } finally {
+              try {
+                tempPartPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+                if (fs.existsSync(listFilePath)) fs.unlinkSync(listFilePath);
+              } catch (_) {}
+            }
+          }
+
+          // SUCCESS
+          split.exportStatus = 'completed';
+          split.videoPath = finalOutputPath;
+          saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+
+          sendProgress({ 
+            status: 'game_complete', 
+            gameIndex: index, 
+            message: `Completed Game ${gameNum}: Successfully exported to "exported_games/${cleanFilename}"`,
+            outputPath: finalOutputPath,
+            filename: cleanFilename
+          });
+
+        } catch (err) {
+          sendProgress({ status: 'error', message: `Finalizing video failed: ${err.message}` });
+          split.exportStatus = 'failed';
+          saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+          continue;
+        }
+      }
 
       // 4. Asynchronously trigger background YouTube upload if requested
       if (youtubeSettings && youtubeSettings.autoUpload) {
-        const titleTemplate = `${split.teamA} vs ${split.teamB} (${split.score})`;
+        if (split.uploadStatus === 'completed' && split.youtubeUrl) {
+          sendProgress({
+            status: 'info',
+            message: `Auto-Upload: Game ${gameNum} already uploaded (Skipping). URL: ${split.youtubeUrl}`
+          });
+          continue;
+        }
+
+        const titleTemplate = `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'} (${split.score || 'Score'})`;
         let desc = youtubeSettings.defaultDesc || 'Badminton Game Split';
         desc = desc
-          .replace(/{players}/g, `${split.teamA} vs ${split.teamB}`)
-          .replace(/{score}/g, split.score);
+          .replace(/{players}/g, `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'}`)
+          .replace(/{score}/g, split.score || 'N/A');
+
+        split.uploadStatus = 'queued';
+        saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
 
         const uploadPromise = (async () => {
           try {
@@ -583,6 +681,9 @@ app.post('/api/export', async (req, res) => {
               message: `🚀 Auto-Upload: Queued Game ${gameNum} ("${titleTemplate}") for YouTube...`
             });
 
+            split.uploadStatus = 'processing';
+            saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+
             const uploadResult = await performYoutubeUpload({
               videoPath: finalOutputPath,
               title: titleTemplate,
@@ -590,6 +691,11 @@ app.post('/api/export', async (req, res) => {
               privacy: youtubeSettings.privacy || 'unlisted',
               playlistId: youtubeSettings.playlistId || null
             });
+
+            split.uploadStatus = 'completed';
+            split.youtubeUrl = uploadResult.url;
+            split.youtubeId = uploadResult.youtubeId;
+            saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
 
             sendProgress({
               status: 'upload_complete',
@@ -600,6 +706,9 @@ app.post('/api/export', async (req, res) => {
             });
           } catch (uploadErr) {
             console.error(`[BACKGROUND UPLOAD ERROR] Game ${gameNum} failed:`, uploadErr.message);
+            split.uploadStatus = 'failed';
+            saveSessionStateDirectly(resolvedPath, splits, youtubeSettings);
+            
             sendProgress({
               status: 'upload_error',
               gameIndex: index,
@@ -614,7 +723,7 @@ app.post('/api/export', async (req, res) => {
     // Cleanup temp directory
     try {
       if (fs.existsSync(tempDir)) {
-        fs.rmdirSync(tempDir);
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
     } catch (cleanupErr) {
       console.error('Error removing temp directory:', cleanupErr);
@@ -640,6 +749,104 @@ app.post('/api/export', async (req, res) => {
     console.error('Exporting error:', err);
     sendProgress({ status: 'critical_error', message: `Export stopped due to error: ${err.message}` });
     res.end();
+  }
+});
+
+/**
+ * Endpoint to manually upload or retry uploading a single game split
+ */
+app.post('/api/upload-single', async (req, res) => {
+  const { dirPath, splitIndex, youtubeSettings } = req.body;
+
+  if (!dirPath || splitIndex === undefined) {
+    return res.status(400).json({ error: 'dirPath and splitIndex are required.' });
+  }
+
+  try {
+    const resolvedPath = path.resolve(dirPath);
+    const projectFilePath = path.join(resolvedPath, 'badminton_session.json');
+
+    if (!fs.existsSync(projectFilePath)) {
+      return res.status(404).json({ error: 'Project session file not found.' });
+    }
+
+    const sessionContent = fs.readFileSync(projectFilePath, 'utf8');
+    const projectSession = JSON.parse(sessionContent);
+    const splits = projectSession.splits;
+
+    if (!splits || !splits[splitIndex]) {
+      return res.status(404).json({ error: 'Split index not found in session.' });
+    }
+
+    const split = splits[splitIndex];
+
+    // Compute expected filename and path
+    const teamANames = sanitizeFilename(split.teamA, 'Team A');
+    const teamBNames = sanitizeFilename(split.teamB, 'Team B');
+    const score = sanitizeFilename(split.score, 'Score');
+    const cleanFilename = `${teamANames} vs ${teamBNames} (${score}).mp4`;
+    const outputDir = path.join(resolvedPath, 'exported_games');
+    const expectedPath = path.join(outputDir, cleanFilename);
+
+    if (!fs.existsSync(expectedPath)) {
+      return res.status(404).json({ error: `Exported video file not found at: ${expectedPath}. Please export the video first.` });
+    }
+
+    // Update state to processing and save
+    split.uploadStatus = 'processing';
+    split.videoPath = expectedPath;
+    fs.writeFileSync(projectFilePath, JSON.stringify(projectSession, null, 2), 'utf8');
+
+    // Title and Description
+    const titleTemplate = `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'} (${split.score || 'Score'})`;
+    let desc = (youtubeSettings && youtubeSettings.defaultDesc) || 'Badminton Game Split';
+    desc = desc
+      .replace(/{players}/g, `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'}`)
+      .replace(/{score}/g, split.score || 'N/A');
+
+    const privacy = (youtubeSettings && youtubeSettings.privacy) || 'unlisted';
+    const playlistId = (youtubeSettings && youtubeSettings.playlistId) || null;
+
+    console.log(`[MANUAL UPLOAD] Starting upload for split ${splitIndex} ("${titleTemplate}")...`);
+    
+    const uploadResult = await performYoutubeUpload({
+      videoPath: expectedPath,
+      title: titleTemplate,
+      description: desc,
+      privacy: privacy,
+      playlistId: playlistId
+    });
+
+    // Update state to completed and save
+    split.uploadStatus = 'completed';
+    split.youtubeUrl = uploadResult.url;
+    split.youtubeId = uploadResult.youtubeId;
+    fs.writeFileSync(projectFilePath, JSON.stringify(projectSession, null, 2), 'utf8');
+
+    res.json({
+      success: true,
+      message: `Game successfully uploaded to YouTube!`,
+      youtubeId: uploadResult.youtubeId,
+      url: uploadResult.url
+    });
+
+  } catch (error) {
+    console.error('[MANUAL UPLOAD ERROR] Single upload failed:', error);
+    
+    // Attempt to mark as failed and save
+    try {
+      const resolvedPath = path.resolve(dirPath);
+      const projectFilePath = path.join(resolvedPath, 'badminton_session.json');
+      if (fs.existsSync(projectFilePath)) {
+        const projectSession = JSON.parse(fs.readFileSync(projectFilePath, 'utf8'));
+        if (projectSession.splits && projectSession.splits[splitIndex]) {
+          projectSession.splits[splitIndex].uploadStatus = 'failed';
+          fs.writeFileSync(projectFilePath, JSON.stringify(projectSession, null, 2), 'utf8');
+        }
+      }
+    } catch (_) {}
+
+    res.status(500).json({ error: error.message });
   }
 });
 
