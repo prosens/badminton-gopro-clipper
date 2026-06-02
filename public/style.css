@@ -1240,6 +1240,7 @@ body {
 .modal-card {
   width: 100%;
   max-width: 480px;
+  max-height: 90vh; /* Prevents overflow of the screen height */
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-lg), 0 0 30px rgba(123, 44, 191, 0.1);
@@ -1288,6 +1289,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 15px;
+  overflow-y: auto; /* Enable scrollbar inside the modal if the body exceeds max-height */
+  flex: 1; /* Expand to fill remaining height */
 }
 
 .modal-explanation {
