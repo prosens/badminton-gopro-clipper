@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Badminton GoPro Game Clipper</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- STARTUP AUTHENTICATION WELCOME OVERLAY -->
+  <div class="welcome-overlay-container" id="auth-welcome-overlay">
+    <div class="welcome-card card">
+      
+      <!-- Welcome Header -->
+      <div class="welcome-header">
+        <span class="welcome-badge-icon">🏸</span>
+        <h2>Badminton GoPro Clipper</h2>
+        <p>A smart, high-performance local video editor. Connect your YouTube account to upload edited game splits directly, or run in Simulation Mode.</p>
+      </div>
+      
+      <!-- Screen 1: Choose Active Profile or Sign In -->
+      <div id="welcome-screen-select" class="welcome-screen">
+        <h4 class="section-title">Select YouTube Profile</h4>
+        <div id="welcome-profiles-list" class="profiles-grid">
+          <!-- Dynamically populated profile items -->
+          <div style="color:var(--text-muted); padding:20px; text-align:center; font-size:12px;">Loading saved channels...</div>
+        </div>
+        
+        <div class="welcome-actions">
+          <button class="btn btn-outline btn-block" id="btn-welcome-new-profile" style="margin-bottom: 12px; width: 100%;">➕ Connect New YouTube Channel</button>
+          <button class="btn btn-success btn-block btn-lg" id="btn-welcome-offline" style="width: 100%;">⚡ Run Offline / Simulation Mode</button>
+        </div>
+      </div>
+      
+      <!-- Screen 2: Add New Channel Form -->
+      <div id="welcome-screen-new" class="welcome-screen" style="display: none;">
+        <h4 class="section-title">Connect Live YouTube Account</h4>
+        <p class="section-desc">Click Login directly to sign in using built-in developer credentials, or optionally paste your own Google credentials below.</p>
+        
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="welcome-client-id">Google OAuth Client ID (Optional)</label>
+          <input type="password" id="welcome-client-id" placeholder="Leave blank to use built-in default credentials">
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label for="welcome-client-secret">Google OAuth Client Secret (Optional)</label>
+          <input type="password" id="welcome-client-secret" placeholder="Leave blank to use built-in default credentials">
+        </div>
+        
+        <!-- Glowing Login Button -->
+        <button class="btn btn-accent btn-block btn-lg" id="btn-welcome-login-google" style="margin-bottom: 20px; width: 100%;">🚀 Login with Google</button>
+        
+        <!-- Hint/Create Mock Profile inside welcome overlay -->
+        <div class="welcome-mock-section" style="border-top: 1px solid var(--border-color); padding-top: 15px; margin-bottom: 20px;">
+          <span class="mock-divider" style="display: block; text-align: center; font-size: 10px; color: var(--text-dark); font-weight: bold; letter-spacing: 1px; margin-bottom: 12px;">OR RUN OFFLINE IN SIMULATION MODE</span>
+          <div class="form-group">
+            <label style="font-size:10px;">Quick Custom Simulation Channel Name</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="welcome-mock-name" placeholder="Channel Name (e.g. Smash Masters Badminton)" style="flex-grow: 1;">
+              <button class="btn btn-primary" id="btn-welcome-create-mock" style="height: 38px; font-size: 12px; font-weight: 700; white-space: nowrap;">Create Mock</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="welcome-footer-actions" style="display: flex; justify-content: flex-start;">
+          <button class="btn btn-outline" id="btn-welcome-back">← Back to Profiles</button>
+        </div>
+      </div>
+      
+    </div>
+  </div>
+
+  <!-- Background Glowing Orbs -->
+  <div class="glow-orb orb-primary"></div>
+  <div class="glow-orb orb-secondary"></div>
+
+  <div class="app-container">
+    
+    <!-- TOP BAR / HEADER -->
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="logo-icon">🏸</span>
+        <div class="logo-text">
+          <h1>Badminton GoPro Clipper</h1>
+          <span class="logo-sub">Smart Video Segmenter & Lossless Joiner</span>
+        </div>
+      </div>
+      
+      <div class="session-loader">
+        <div class="input-group">
+          <input type="text" id="dir-path-input" placeholder="Paste or browse local directory containing GoPro videos..." value="" autocomplete="off">
+          <button id="browse-btn" class="btn btn-outline" style="border: none; border-left: 1px solid var(--border-color); border-radius: 0; padding: 10px 18px; font-size: 13px;">Browse...</button>
+          <button id="scan-btn" class="btn btn-primary">Scan Directory</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN APP LAYOUT -->
+    <main class="app-main">
+      
+      <!-- LEFT WORKSPACE: Video Player & Timeline -->
+      <section class="workspace-panel">
+        
+        <!-- Video Container -->
+        <div class="video-card card">
+          <div class="video-header">
+            <span class="badge" id="current-file-badge">No Video Loaded</span>
+            <span class="video-resolution" id="video-resolution-label">0x0 (0.00 fps)</span>
+          </div>
+          
+          <div class="video-viewport">
+            <video id="main-player" controls style="display: none;"></video>
+            <div id="video-hud-toast" class="hud-toast" style="display: none;">🎯 Game Start Marked</div>
+            
+            <!-- Video Placeholder -->
+            <div id="video-placeholder" class="video-placeholder">
+              <div class="placeholder-content">
+                <span class="big-icon">🎬</span>
+                <h3>No GoPro Videos Loaded</h3>
+                <p>Paste a local folder path above and click "Scan Directory" to begin.</p>
+                <div class="sample-paths">
+                  <span>Example format:</span>
+                  <code>/Users/yourname/Movies/GoPro_Badminton_May28</code>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Custom Video Controls -->
+          <div class="custom-controls" id="custom-player-controls" style="display: none;">
+            <div class="control-row">
+              <div class="playback-buttons">
+                <button class="btn btn-icon" id="btn-prev-game" title="Previous Game">⏮</button>
+                <button class="btn btn-icon" id="btn-back-5s" title="Backward 5s (←)">◀◀</button>
+                <button class="btn btn-icon" id="btn-back-1s" title="Backward 1s">◀</button>
+                <button class="btn btn-play" id="btn-play-pause" title="Play/Pause (Space)">Play</button>
+                <button class="btn btn-icon" id="btn-forward-1s" title="Forward 1s">▶</button>
+                <button class="btn btn-icon" id="btn-forward-5s" title="Forward 5s (→)">▶▶</button>
+                <button class="btn btn-icon" id="btn-next-game" title="Next Game">⏭</button>
+              </div>
+              
+              <div class="time-displays">
+                <span class="time-current" id="time-current">00:00:00</span>
+                <span class="time-separator">/</span>
+                <span class="time-duration" id="time-duration">00:00:00</span>
+              </div>
+              
+              <div class="speed-controls">
+                <label for="speed-select">Speed:</label>
+                <select id="speed-select" class="speed-select">
+                  <option value="0.5">0.5x</option>
+                  <option value="1" selected>1.0x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2.0x</option>
+                  <option value="4">4.0x (Seek)</option>
+                  <option value="8">8.0x (Fast Scan)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Interactive Visual Timeline -->
+        <div class="timeline-card card" id="timeline-workspace" style="display: none;">
+          <div class="timeline-header">
+            <h3>Unified Continuous Session Timeline</h3>
+            <div class="timeline-legend">
+              <span class="legend-item"><span class="legend-dot color-file"></span> GoPro Chapters</span>
+              <span class="legend-item"><span class="legend-dot color-split"></span> Active Game Segments</span>
+            </div>
+          </div>
+          
+          <div class="timeline-wrapper">
+            <!-- Timeline Rulers & Playhead -->
+            <div class="timeline-scrub-area" id="timeline-scrub-area">
+              <div class="timeline-playhead" id="timeline-playhead"></div>
+              <div id="pin-start" class="timeline-pin pin-in" style="display: none;">🎯 START</div>
+              <div id="pin-end" class="timeline-pin pin-out" style="display: none;">🏁 END</div>
+              <canvas id="timeline-canvas" height="60"></canvas>
+            </div>
+          </div>
+
+          <div class="timeline-tools">
+            <button class="btn btn-accent btn-sm" id="btn-mark-start" title="Set Game Start Point (I)">
+              🎯 Mark Game Start <kbd class="keyboard-key">I</kbd>
+            </button>
+            <button class="btn btn-accent btn-sm" id="btn-mark-end" title="Set Game End Point (O)">
+              🏁 Mark Game End <kbd class="keyboard-key">O</kbd>
+            </button>
+            <div class="marker-divider"></div>
+            <button class="btn btn-success btn-sm" id="btn-add-split">
+              ➕ Add Split Segment
+            </button>
+            <span class="marker-feedback" id="marker-feedback">Start: --:-- | End: --:--</span>
+          </div>
+        </div>
+
+        <!-- Hotkeys Quickguide Panel -->
+        <div class="hotkeys-guide card">
+          <div class="guide-header">
+            <span>💡 Clickable Keyboard Controller</span>
+          </div>
+          <div class="keys-grid">
+            <div class="key-item"><kbd class="key" id="key-btn-space">Space</kbd> Play / Pause</div>
+            <div class="key-item"><kbd class="key" id="key-btn-left">←</kbd> Seek Back 5s</div>
+            <div class="key-item"><kbd class="key" id="key-btn-right">→</kbd> Seek Fwd 5s</div>
+            <div class="key-item"><kbd class="key" id="key-btn-i">I</kbd> Mark Game Start</div>
+            <div class="key-item"><kbd class="key" id="key-btn-o">O</kbd> Mark Game End</div>
+            <div class="key-item"><kbd class="key" id="key-btn-enter">Enter</kbd> Add Split</div>
+          </div>
+        </div>
+        
+      </section>
+      
+      <!-- RIGHT WORKSPACE: Sidebar with Games list and export options -->
+      <aside class="sidebar-panel">
+        
+        <!-- GoPro Folder Content / Files Details -->
+        <div class="sidebar-card card" id="files-details-card" style="display: none;">
+          <div class="card-header collapse-trigger" id="files-list-header">
+            <h3>Files in Session (<span id="total-files-count">0</span>)</h3>
+            <span class="icon-toggle">▼</span>
+          </div>
+          <div class="card-body" id="files-list-body">
+            <div class="files-mini-list" id="files-mini-list">
+              <!-- JS populates files here -->
+            </div>
+            <div class="files-summary-text" id="files-summary-text">
+              Total Duration: 0h 0m
+            </div>
+          </div>
+        </div>
+
+        <!-- Games Split list -->
+        <div class="sidebar-card card flex-expand" id="splits-editor-card" style="display: none;">
+          <div class="card-header">
+            <h3>Game splits & Scorecard (<span id="splits-count">0</span>)</h3>
+            <button class="btn btn-sm btn-outline-danger" id="btn-clear-splits">Clear All</button>
+          </div>
+          
+          <div class="splits-list-viewport" id="splits-list-viewport">
+            <!-- Empty State -->
+            <div class="splits-empty-state" id="splits-empty-state" style="display: flex; flex-direction: column; align-items: stretch; text-align: left; padding: 15px;">
+              <div style="text-align: center; margin-bottom: 12px;">
+                <span class="small-icon" style="font-size: 32px; display: block;">🏸</span>
+                <h4 style="font-family: 'Outfit', sans-serif; font-size: 14px; font-weight: 700; color: var(--text-bright); margin-top: 5px;">How to Clip & Export Matches</h4>
+              </div>
+              <div class="workflow-checklist" style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; color: var(--text-muted); line-height: 1.4;">
+                <div style="display: flex; gap: 8px;"><span style="color: var(--color-primary); font-weight: bold;">1.</span> <span>Find the <strong>start</strong> of a match. Play or scrub, then click <kbd class="keyboard-key" style="margin: 0;">I</kbd> or <strong>Mark Start</strong>.</span></div>
+                <div style="display: flex; gap: 8px;"><span style="color: var(--color-primary); font-weight: bold;">2.</span> <span>Find the <strong>end</strong> of the match. Click <kbd class="keyboard-key" style="margin: 0;">O</kbd> or <strong>Mark End</strong>.</span></div>
+                <div style="display: flex; gap: 8px;"><span style="color: var(--color-primary); font-weight: bold;">3.</span> <span>Click <strong>➕ Add Split Segment</strong> to record the game. You'll see a scorecard card appear.</span></div>
+                <div style="display: flex; gap: 8px;"><span style="color: var(--color-primary); font-weight: bold;">4.</span> <span>Fill in the players and score on the scorecard. Repeat for all games!</span></div>
+                <div style="display: flex; gap: 8px;"><span style="color: var(--color-primary); font-weight: bold;">5.</span> <span>Click <strong>⚡ Export</strong> to losslessly split and merge your matches in seconds!</span></div>
+              </div>
+            </div>
+            
+            <!-- JS populates game cards here -->
+          </div>
+          
+          <div class="splits-footer">
+            <button class="btn btn-success btn-block" id="btn-save-project">💾 Save Project splits</button>
+          </div>
+        </div>
+
+        <!-- Export Hub -->
+        <div class="sidebar-card card" id="export-hub-card" style="display: none;">
+          <div class="card-header">
+            <h3>Lossless Export Hub</h3>
+          </div>
+          <div class="card-body">
+            <p class="export-note">Produces 100% original quality, lossless game cuts spanning across chapter boundaries instantly using ffmpeg.</p>
+            <div class="form-group-checkbox" style="margin: 15px 0 15px 0; display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <input type="checkbox" id="yt-auto-upload" style="width: auto; margin: 0; cursor: pointer;">
+              <label for="yt-auto-upload" style="margin: 0; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 4px;">🚀 Auto-Upload to YouTube</label>
+            </div>
+            <button class="btn btn-accent btn-block btn-lg" id="btn-export-all">
+              ⚡ Export Game Specific Videos
+            </button>
+          </div>
+        </div>
+
+        <!-- YouTube Uploader Panel -->
+        <div class="sidebar-card card" id="youtube-uploader-card" style="display: none;">
+          <div class="card-header">
+            <h3>YouTube Upload Center</h3>
+          </div>
+          <div class="card-body">
+            <div class="yt-credentials">
+              <div class="yt-status-disconnected">
+                <span class="yt-dot"></span> YouTube API: Ready to Configure
+              </div>
+            </div>
+            <div class="yt-action-panel">
+              <button class="btn btn-outline btn-block btn-sm" id="btn-yt-config">⚙️ Setup YouTube Settings</button>
+            </div>
+          </div>
+        </div>
+        
+      </aside>
+
+    </main>
+
+    <!-- REALTIME EXPORT LOGGER / CONSOLE (Floating/Bottom overlay) -->
+    <footer class="app-footer-console" id="export-console-panel" style="display: none;">
+      <div class="console-header">
+        <div class="console-title">
+          <span class="console-dot-green"></span>
+          <span>SYSTEM LOG & EXPORT MONITOR</span>
+        </div>
+        <div class="console-controls">
+          <button id="btn-close-console" class="btn-console-close">×</button>
+        </div>
+      </div>
+      <div class="console-progress-bar-container" id="console-progress-container" style="display: none;">
+        <div class="console-progress-bar-fill" id="console-progress-fill"></div>
+        <span class="console-progress-text" id="console-progress-text">Exporting: 0%</span>
+      </div>
+      <pre class="console-body" id="console-body">
+[SYSTEM] Ready.
+      </pre>
+    </footer>
+
+    <!-- YouTube Config Modal -->
+    <div class="modal-overlay" id="youtube-modal" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>YouTube Channel Settings</h3>
+          <button class="modal-close" id="btn-close-yt-modal">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-explanation">This app runs 100% locally. To upload directly to YouTube, you can enter your credentials or configure your defaults here.</p>
+          
+          <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 15px;">
+            <h4 style="font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 700; color: var(--text-bright); margin-bottom: 10px;">👤 Active YouTube Login Profile</h4>
+            <div class="form-group" style="margin-bottom: 10px;">
+              <select id="yt-profile-select" style="width: 100%; padding: 10px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); font-size: 13px;">
+                <!-- Dynamically populated list of profiles -->
+              </select>
+            </div>
+            
+            <div id="yt-profiles-manage-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: var(--radius-sm); padding: 8px; border: 1px solid var(--border-color); margin-top: 8px;">
+              <!-- Mini profile manager with delete buttons -->
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="yt-channel-name">Target Channel Name</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="yt-channel-name" value="My Badminton Sessions" placeholder="Enter target channel" style="flex-grow: 1;">
+              <button class="btn btn-primary" id="btn-browse-yt-channels" style="padding: 0 16px; font-size: 11px; font-weight: 700; flex-shrink: 0; height: 38px;">Browse...</button>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="yt-default-privacy">Default Upload Privacy</label>
+            <select id="yt-default-privacy">
+              <option value="private">Private (Only You)</option>
+              <option value="unlisted" selected>Unlisted (Only with Link)</option>
+              <option value="public">Public (Everyone)</option>
+            </select>
+          </div>
+
+          <!-- YouTube Playlist Settings -->
+          <div style="border-top: 1px solid var(--border-color); margin: 15px 0; padding-top: 15px;">
+            <h4 style="font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 700; color: var(--text-bright); margin-bottom: 10px;">📁 YouTube Playlist Settings</h4>
+            
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="yt-playlist-mode">Playlist Mode</label>
+              <select id="yt-playlist-mode">
+                <option value="none" selected>None (Just upload to channel)</option>
+                <option value="select">Select Existing Playlist</option>
+                <option value="create">Create New Playlist</option>
+              </select>
+            </div>
+
+            <!-- Select Existing Playlist Block (Conditional) -->
+            <div id="yt-playlist-select-block" style="display: none; margin-bottom: 12px;">
+              <label for="yt-playlist-select">Choose Playlist</label>
+              <div style="display: flex; gap: 8px;">
+                <select id="yt-playlist-select" style="flex-grow: 1;">
+                  <option value="">-- Fetching playlists... --</option>
+                </select>
+                <button class="btn btn-outline" id="btn-refresh-playlists" style="padding: 0 12px; font-size: 13px; flex-shrink: 0; height: 38px;" title="Refresh Playlists">🔄</button>
+              </div>
+            </div>
+
+            <!-- Create New Playlist Block (Conditional) -->
+            <div id="yt-playlist-create-block" style="display: none; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 12px;">
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="yt-new-playlist-title" style="font-size: 11px;">New Playlist Title</label>
+                <input type="text" id="yt-new-playlist-title" placeholder="e.g. Badminton Matches May 2026">
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="yt-new-playlist-desc" style="font-size: 11px;">Description (Optional)</label>
+                <textarea id="yt-new-playlist-desc" rows="2" placeholder="Weekly games recorded on GoPro" style="font-size: 12px; padding: 6px 10px; width: 100%; box-sizing: border-box; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm);"></textarea>
+              </div>
+              <button class="btn btn-primary btn-sm btn-block" id="btn-create-playlist-submit">🔨 Create & Select Playlist</button>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-color); margin: 15px 0; padding-top: 15px;">
+            <h4 style="font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 700; color: var(--text-bright); margin-bottom: 10px;">🔑 Google API Credentials (Optional - for Live Account)</h4>
+            <p style="font-size: 10px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">Leave blank to use pre-configured developer credentials for seamless one-click Google sign-in. Fill these in only if you wish to override with your own custom credentials.</p>
+            
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label for="yt-client-id" style="font-size: 10px;">OAuth Client ID (Optional)</label>
+              <input type="password" id="yt-client-id" placeholder="Leave blank to use built-in default credentials" style="font-size: 11px; padding: 8px 12px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label for="yt-client-secret" style="font-size: 10px;">OAuth Client Secret (Optional)</label>
+              <input type="password" id="yt-client-secret" placeholder="Leave blank to use built-in default credentials" style="font-size: 11px; padding: 8px 12px;">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="yt-default-desc">Default Description Template</label>
+            <textarea id="yt-default-desc" rows="4">Weekly Badminton Session.
+Recorded locally.
+
+Players: {players}
+Score: {score}
+
+Splits processed with Badminton GoPro Clipper.</textarea>
+          </div>
+          
+          <div class="yt-auth-notice">
+            <strong>🔒 Local Security Notice</strong>
+            <p>Your OAuth files are stored safely in your folder path inside <code>badminton_session.json</code>. No data is transmitted externally except to Google YouTube APIs.</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btn-cancel-yt-modal">Cancel</button>
+          <button class="btn btn-primary" id="btn-save-yt-settings">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- YouTube Channel Browser Modal -->
+    <div class="modal-overlay" id="yt-channels-modal" style="display: none; z-index: 10001;">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <h3>Browse Authorized Channels</h3>
+          <button class="modal-close" id="btn-close-yt-channels-modal">×</button>
+        </div>
+        <div class="modal-body" style="padding: 18px 24px; gap: 15px;">
+          <p class="modal-explanation" style="margin-bottom: 8px;">Select a YouTube channel associated with your Google Account.</p>
+          
+          <div class="form-group" style="margin-bottom: 5px;">
+            <input type="text" id="yt-channel-search" placeholder="🔍 Search channels..." style="width: 100%; box-sizing: border-box; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); font-size: 13px;">
+          </div>
+          
+          <div id="yt-channels-viewport" style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.15); border-radius: var(--radius-md); padding: 8px; border: 1px solid var(--border-color);">
+            <!-- JS populates channels here -->
+          </div>
+        </div>
+        <div class="modal-footer" style="padding-top: 10px; display: flex; gap: 10px;">
+          <button class="btn btn-outline" id="btn-cancel-yt-channels-modal" style="flex: 1;">Cancel</button>
+          <button class="btn btn-primary" id="btn-select-yt-channel" style="flex: 1;" disabled>Select Channel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local Folder Browser Modal -->
+    <div class="modal-overlay" id="folder-modal" style="display: none;">
+      <div class="modal-card" style="max-width: 600px;">
+        <div class="modal-header">
+          <h3>Select Local Video Folder</h3>
+          <button class="modal-close" id="btn-close-folder-modal">×</button>
+        </div>
+        <div class="modal-body" style="gap: 12px; padding: 18px 24px;">
+          <p class="modal-explanation">Navigate through your local system to select the directory containing your GoPro badminton recordings.</p>
+          
+          <!-- Path Bar and Up Button -->
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="btn-folder-up" class="btn btn-icon" style="padding: 10px; font-weight: bold;" title="Go Up One Folder">📁 ⇡ Up</button>
+            <input type="text" id="folder-browser-path" style="flex-grow: 1; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm);" readonly>
+          </div>
+
+          <!-- Folders Viewport -->
+          <div id="folder-browser-viewport" style="background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-md); height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 10px;">
+            <!-- Folders will be listed here dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btn-cancel-folder-modal">Cancel</button>
+          <button class="btn btn-primary" id="btn-select-folder">Select This Folder</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

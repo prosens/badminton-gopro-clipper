@@ -1,0 +1,41 @@
+#!/bin/bash
+# Badminton GoPro Clipper Launcher Script
+
+# Add typical Node.js/Brew installation paths to PATH
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+APP_DIR="/Users/prosenjitsinha/.gemini/antigravity/scratch/badminton-game-cutter"
+
+# Trigger a gentle launch notification
+osascript -e 'display notification "Launching Badminton GoPro Clipper..." with title "Badminton Clipper"'
+
+# Check if port 4000 is already active
+if curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 http://localhost:4000 | grep -q "200"; then
+    echo "[SYSTEM] Server is already running. Opening browser..."
+    osascript -e 'display notification "Server is already active. Opening browser..." with title "Badminton Clipper"'
+    open http://localhost:4000
+    exit 0
+fi
+
+# Not running! Navigate and start the server
+if [ -d "$APP_DIR" ]; then
+    cd "$APP_DIR"
+    
+    # Start node in the background and redirect output to logs
+    node server.js > app_runner.log 2>&1 &
+    
+    # Wait for startup
+    sleep 1.5
+    
+    # Verify starting
+    if curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 http://localhost:4000 | grep -q "200"; then
+        osascript -e 'display notification "Backend running successfully!" with title "Badminton Clipper"'
+        open http://localhost:4000
+    else
+        osascript -e 'display alert "Badminton Clipper Error" message "Failed to start Node server.js. Please check app_runner.log inside the workspace directory for errors."'
+    fi
+else
+    osascript -e 'display alert "Badminton Clipper Error" message "Application directory not found. Please ensure the workspace folder exists at: '"$APP_DIR"'"'
+fi
+
+exit 0

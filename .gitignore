@@ -1,0 +1,32 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local credentials (CRITICAL: Do not upload OAuth tokens/secrets to GitHub)
+global_youtube_profiles.json
+badminton_session.json
+google_credentials.json
+
+# Temporary render files and logging
+.temp_clipper/
+.temp_test_clipper/
+app_runner.log
+*.log
+
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.Spotlight-V100
+.Trashes
+.VolumeIcon.icns
+.fseventsd
+
+# Mock/Test output videos (optional, but clean)
+mock_gopro_session/exported_games/
+exported_games/

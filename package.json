@@ -1,0 +1,22 @@
+{
+  "name": "badminton-game-cutter",
+  "version": "1.0.0",
+  "description": "Local web application to virtually merge, split, and stitch GoPro recordings into badminton game-specific videos.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "gopro",
+    "video-trimmer",
+    "badminton",
+    "ffmpeg",
+    "lossless"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}
