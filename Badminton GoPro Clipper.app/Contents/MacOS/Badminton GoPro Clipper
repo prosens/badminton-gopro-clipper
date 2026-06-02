@@ -4,7 +4,15 @@
 # Add typical Node.js/Brew installation paths to PATH
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-APP_DIR="/Users/prosenjitsinha/.gemini/antigravity/scratch/badminton-game-cutter"
+# Resolve directory dynamically to make the app fully portable
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PORTABLE_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+if [ -f "$PORTABLE_DIR/server.js" ]; then
+    APP_DIR="$PORTABLE_DIR"
+else
+    APP_DIR="/Users/prosenjitsinha/.gemini/antigravity/scratch/badminton-game-cutter"
+fi
 
 # Trigger a gentle launch notification
 osascript -e 'display notification "Launching Badminton GoPro Clipper..." with title "Badminton Clipper"'
