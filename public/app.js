@@ -1096,36 +1096,11 @@ function renderSplitsList() {
   
   elements.splitsEmptyState.style.display = 'none';
   
-  // Maintain existing input fields values by storing them
-  const inputsBackup = [];
-  const cards = elements.splitsListViewport.querySelectorAll('.split-card');
-  cards.forEach(card => {
-    const idx = parseInt(card.dataset.index, 10);
-    const titleInput = card.querySelector('.title-input');
-    const teamAInput = card.querySelector('.teama-input');
-    const teamBInput = card.querySelector('.teamb-input');
-    const scoreInput = card.querySelector('.score-input');
-    if (titleInput) {
-      inputsBackup[idx] = {
-        title: titleInput.value,
-        teamA: teamAInput.value,
-        teamB: teamBInput.value,
-        score: scoreInput.value
-      };
-    }
-  });
-
   // Remove only split cards, do NOT delete the empty-state
   const existingCards = elements.splitsListViewport.querySelectorAll('.split-card');
   existingCards.forEach(c => c.remove());
 
   state.splits.forEach((s, idx) => {
-    const backup = inputsBackup[idx] || {};
-    s.title = backup.title !== undefined ? backup.title : s.title;
-    s.teamA = backup.teamA !== undefined ? backup.teamA : s.teamA;
-    s.teamB = backup.teamB !== undefined ? backup.teamB : s.teamB;
-    s.score = backup.score !== undefined ? backup.score : s.score;
-
     const duration = s.end - s.start;
     const card = document.createElement('div');
     card.className = 'split-card';
@@ -1169,6 +1144,12 @@ function renderSplitsList() {
 
     card.querySelector('.btn-delete-split').addEventListener('click', () => {
       state.splits.splice(idx, 1);
+      // Re-index default titles for sequential order
+      state.splits.forEach((s, i) => {
+        if (s.title.startsWith('Game ')) {
+          s.title = `Game ${i + 1}`;
+        }
+      });
       renderSplitsList();
       drawTimelineCanvas();
       logToConsole(`[SYSTEM] Deleted split ${idx + 1}`, 'info');
