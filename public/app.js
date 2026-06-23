@@ -632,13 +632,35 @@ function renderFilesMiniList() {
     row.className = `file-row ${idx === state.activeFileIndex ? 'playing' : ''}`;
     row.id = `file-row-${idx}`;
     row.innerHTML = `
-      <span class="file-row-name">${f.name}</span>
-      <span class="file-row-dur">${formatTime(f.duration)}</span>
+      <span class="file-row-name" title="${f.name}">${f.name}</span>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="file-row-dur">${formatTime(f.duration)}</span>
+        <div class="file-row-reorder-actions">
+          <button class="btn-file-reorder btn-move-up" title="Move Video Up" ${idx === 0 ? 'disabled' : ''}>▲</button>
+          <button class="btn-file-reorder btn-move-down" title="Move Video Down" ${idx === state.files.length - 1 ? 'disabled' : ''}>▼</button>
+        </div>
+      </div>
     `;
     
     row.addEventListener('click', () => {
       selectFileAndPlay(idx, 0, true);
     });
+
+    const upBtn = row.querySelector('.btn-move-up');
+    if (upBtn) {
+      upBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        moveFileInSequence(idx, -1);
+      });
+    }
+
+    const downBtn = row.querySelector('.btn-move-down');
+    if (downBtn) {
+      downBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        moveFileInSequence(idx, 1);
+      });
+    }
     
     elements.filesMiniList.appendChild(row);
   });
@@ -647,6 +669,51 @@ function renderFilesMiniList() {
   const totalHrs = Math.floor(totalMin / 60);
   const remMin = totalMin % 60;
   elements.filesSummaryText.textContent = `Total Session Duration: ${totalHrs}h ${remMin}m (${formatTime(state.virtualDuration)})`;
+}
+
+/**
+ * Move a file index inside state.files by direction (-1 for Up, 1 for Down)
+ */
+function moveFileInSequence(idx, direction) {
+  const targetIdx = idx + direction;
+  if (targetIdx < 0 || targetIdx >= state.files.length) return;
+
+  const activeFilePath = state.files[state.activeFileIndex]?.path;
+
+  // Swap elements
+  const temp = state.files[idx];
+  state.files[idx] = state.files[targetIdx];
+  state.files[targetIdx] = temp;
+
+  // Recalculate global timeline boundaries
+  recalculateGlobalFileBoundaries();
+
+  // Restore activeFileIndex based on file path
+  if (activeFilePath) {
+    state.activeFileIndex = state.files.findIndex(f => f.path === activeFilePath);
+  }
+
+  // Update UI components
+  renderFilesMiniList();
+  drawTimelineCanvas();
+  updateTimelineIndicators();
+  renderSplitsList();
+
+  // Auto-save the new sequence inside badminton_session.json
+  saveProjectSession();
+}
+
+/**
+ * Helper to recalculate global offsets for files in session
+ */
+function recalculateGlobalFileBoundaries() {
+  let cumulative = 0;
+  state.files.forEach(f => {
+    f.globalStart = cumulative;
+    f.globalEnd = cumulative + f.duration;
+    cumulative = f.globalEnd;
+  });
+  state.virtualDuration = cumulative;
 }
 
 /**
@@ -1294,7 +1361,8 @@ async function saveProjectSession() {
     dirPath: state.dirPath,
     projectData: {
       splits: state.splits,
-      youtubeSettings: state.youtubeSettings
+      youtubeSettings: state.youtubeSettings,
+      files: state.files.map(f => ({ name: f.name, path: f.path, duration: f.duration }))
     }
   };
 

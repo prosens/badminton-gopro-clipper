@@ -236,6 +236,26 @@ app.post('/api/scan', async (req, res) => {
         const fileContent = fs.readFileSync(projectFilePath, 'utf8');
         projectSession = JSON.parse(fileContent);
 
+        // Restore custom file sequence if saved in the session
+        if (projectSession && projectSession.files) {
+          const orderedDetails = [];
+          projectSession.files.forEach(savedFile => {
+            const match = fileDetails.find(f => f.name === savedFile.name);
+            if (match) {
+              orderedDetails.push(match);
+            }
+          });
+          // Append any newly added scanned files that were not in the saved list
+          fileDetails.forEach(f => {
+            if (!orderedDetails.some(saved => saved.name === f.name)) {
+              orderedDetails.push(f);
+            }
+          });
+          // Clear and refill in-place since fileDetails is declared const
+          fileDetails.length = 0;
+          fileDetails.push(...orderedDetails);
+        }
+
         // Self-heal and auto-detect existing video files on disk
         const outputDir = path.join(resolvedPath, 'exported_games');
         if (projectSession && projectSession.splits) {

@@ -682,6 +682,39 @@ body {
 
 .file-row-dur {
   color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.file-row-reorder-actions {
+  display: flex;
+  gap: 3px;
+}
+
+.btn-file-reorder {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+  line-height: 1;
+}
+
+.btn-file-reorder:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-primary);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.btn-file-reorder:disabled {
+  opacity: 0.15;
+  cursor: not-allowed;
+  border-color: transparent;
 }
 
 .files-summary-text {
