@@ -684,7 +684,7 @@ app.post('/api/export', async (req, res) => {
           continue;
         }
 
-        const titleTemplate = `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'} (${split.score || 'Score'})`;
+        const titleTemplate = split.title || `Game ${gameNum}`;
         let desc = youtubeSettings.defaultDesc || 'Badminton Game Split';
         desc = desc
           .replace(/{players}/g, `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'}`)
@@ -818,7 +818,7 @@ app.post('/api/upload-single', async (req, res) => {
     fs.writeFileSync(projectFilePath, JSON.stringify(projectSession, null, 2), 'utf8');
 
     // Title and Description
-    const titleTemplate = `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'} (${split.score || 'Score'})`;
+    const titleTemplate = split.title || `Game ${splitIndex + 1}`;
     let desc = (youtubeSettings && youtubeSettings.defaultDesc) || 'Badminton Game Split';
     desc = desc
       .replace(/{players}/g, `${split.teamA || 'Team A'} vs ${split.teamB || 'Team B'}`)
@@ -1670,7 +1670,8 @@ async function performYoutubeUpload({ videoPath, title, description, privacy, pl
         categoryId: '17' // 'Sports' category ID is 17!
       },
       status: {
-        privacyStatus: privacy || 'unlisted'
+        privacyStatus: privacy || 'unlisted',
+        selfDeclaredMadeForKids: false
       }
     };
 

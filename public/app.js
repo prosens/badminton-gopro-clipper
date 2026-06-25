@@ -360,12 +360,19 @@ function init() {
           elements.ytPlaylistSelectBlock.style.display = 'block';
           elements.ytPlaylistCreateBlock.style.display = 'none';
           
+          // Update settings state directly
+          state.youtubeSettings.playlistMode = 'select';
+          state.youtubeSettings.playlistId = data.playlist.id;
+          
           // Clear fields
           elements.ytNewPlaylistTitle.value = '';
           elements.ytNewPlaylistDesc.value = '';
           
           // Fetch playlists and select the newly created one!
           await fetchPlaylists(data.playlist.id);
+
+          // Auto-save project session with new playlist settings
+          await saveProjectSession();
         } else {
           alert('Failed to create playlist: ' + (data.error || 'Unknown error'));
         }
@@ -1618,7 +1625,7 @@ function appendYtUploadButtonToLog(filename, fullPath, splitInfo) {
     const playersString = `${splitInfo.teamA || 'Team A'} vs ${splitInfo.teamB || 'Team B'}`;
     desc = desc.replace('{players}', playersString).replace('{score}', splitInfo.score || 'N/A');
 
-    const youtubeTitle = `${splitInfo.teamA || 'Team A'} vs ${splitInfo.teamB || 'Team B'} (${splitInfo.score || 'Score'})`;
+    const youtubeTitle = splitInfo.title || 'Badminton Game';
 
     try {
       const response = await fetch('/api/youtube-upload', {
@@ -1719,6 +1726,7 @@ function saveYtSettings() {
 
   closeYtModal();
   logToConsole(`[SYSTEM] YouTube settings saved: Target channel is "${state.youtubeSettings.channelName}" (${state.youtubeSettings.privacy})`, 'info');
+  saveProjectSession();
 }
 
 async function fetchPlaylists(selectedPlaylistId) {
