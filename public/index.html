@@ -235,6 +235,23 @@
           </div>
         </div>
 
+        <!-- Session Players Pool -->
+        <div class="sidebar-card card" id="players-card" style="display: none;">
+          <div class="card-header collapse-trigger" id="players-header">
+            <h3>Manage Players Pool (<span id="players-count">0</span>)</h3>
+            <span class="icon-toggle">▼</span>
+          </div>
+          <div class="card-body" id="players-body">
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+              <input type="text" id="input-new-player" placeholder="Enter player name" style="flex-grow: 1; padding: 6px 10px; font-size: 13px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+              <button class="btn btn-primary btn-sm" id="btn-add-player" style="padding: 0 12px; font-weight: 700; height: 34px;">Add</button>
+            </div>
+            <div id="players-list-tags" style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <!-- JS populates tags here -->
+            </div>
+          </div>
+        </div>
+
         <!-- Games Split list -->
         <div class="sidebar-card card flex-expand" id="splits-editor-card" style="display: none;">
           <div class="card-header">

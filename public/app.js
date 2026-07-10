@@ -12,6 +12,7 @@ const state = {
   virtualPlayhead: 0,   // Playhead position in global timeline (seconds)
   
   splits: [],           // List of Game splits { start, end, title, teamA, teamB, score }
+  players: [],          // List of Session Players
   markers: {
     start: null,        // Global time (seconds)
     end: null           // Global time (seconds)
@@ -86,6 +87,15 @@ const elements = {
   splitsCount: document.getElementById('splits-count'),
   btnSaveProject: document.getElementById('btn-save-project'),
   btnClearSplits: document.getElementById('btn-clear-splits'),
+  
+  // Players Pool
+  playersCard: document.getElementById('players-card'),
+  playersHeader: document.getElementById('players-header'),
+  playersBody: document.getElementById('players-body'),
+  inputNewPlayer: document.getElementById('input-new-player'),
+  btnAddPlayer: document.getElementById('btn-add-player'),
+  playersListTags: document.getElementById('players-list-tags'),
+  playersCount: document.getElementById('players-count'),
   
   // Export Hub
   exportHubCard: document.getElementById('export-hub-card'),
@@ -221,6 +231,21 @@ function init() {
   elements.filesListHeader.addEventListener('click', () => {
     elements.filesListHeader.classList.toggle('collapsed');
     elements.filesListBody.style.display = elements.filesListHeader.classList.contains('collapsed') ? 'none' : 'block';
+  });
+
+  // Collapsible players pool list
+  elements.playersHeader.addEventListener('click', () => {
+    elements.playersHeader.classList.toggle('collapsed');
+    elements.playersBody.style.display = elements.playersHeader.classList.contains('collapsed') ? 'none' : 'block';
+  });
+
+  // Players pool input listeners
+  elements.btnAddPlayer.addEventListener('click', handleAddPlayerFromInput);
+  elements.inputNewPlayer.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddPlayerFromInput();
+    }
   });
 
   // Playback Control Handlers
@@ -586,6 +611,11 @@ async function scanDirectory(pathStr) {
         state.splits = data.projectSession.splits;
         logToConsole(`[SYSTEM] Loaded ${state.splits.length} saved game splits from project session file.`, 'info');
       }
+      if (data.projectSession.players) {
+        state.players = data.projectSession.players;
+      } else {
+        state.players = [];
+      }
       if (data.projectSession.youtubeSettings) {
         state.youtubeSettings = data.projectSession.youtubeSettings;
         
@@ -595,6 +625,38 @@ async function scanDirectory(pathStr) {
           label.innerHTML = `<span class="yt-dot" style="background:#10B981;"></span> YouTube Channel: <strong>${state.youtubeSettings.channelName}</strong>`;
         }
       }
+
+      // Backward compatibility auto-parsing and setup
+      state.splits.forEach(s => {
+        if (s.playerA1 === undefined) s.playerA1 = '';
+        if (s.playerA2 === undefined) s.playerA2 = '';
+        if (s.playerB1 === undefined) s.playerB1 = '';
+        if (s.playerB2 === undefined) s.playerB2 = '';
+        if (s.isCustomTitle === undefined) s.isCustomTitle = false;
+
+        if (s.teamA && !s.playerA1 && !s.playerA2) {
+          const parts = s.teamA.split('/');
+          s.playerA1 = parts[0] || '';
+          s.playerA2 = parts[1] || '';
+          parts.forEach(p => {
+            if (p && p !== 'Team A' && !state.players.includes(p)) {
+              state.players.push(p);
+            }
+          });
+        }
+        if (s.teamB && !s.playerB1 && !s.playerB2) {
+          const parts = s.teamB.split('/');
+          s.playerB1 = parts[0] || '';
+          s.playerB2 = parts[1] || '';
+          parts.forEach(p => {
+            if (p && p !== 'Team B' && !state.players.includes(p)) {
+              state.players.push(p);
+            }
+          });
+        }
+      });
+    } else {
+      state.players = [];
     }
 
     // Toggle panel visibility
@@ -603,11 +665,13 @@ async function scanDirectory(pathStr) {
     elements.customPlayerControls.style.display = 'block';
     elements.timelineWorkspace.style.display = 'block';
     elements.filesDetailsCard.style.display = 'flex';
+    elements.playersCard.style.display = 'flex';
     elements.splitsEditorCard.style.display = 'flex';
     elements.exportHubCard.style.display = 'flex';
     elements.youtubeCard.style.display = 'flex';
 
     // Update files mini list sidebar
+    renderPlayersPool();
     renderFilesMiniList();
     renderSplitsList();
     updateTimelineIndicators();
@@ -1129,7 +1193,12 @@ function addSplitSegment() {
     title: `Game ${newGameIndex}`,
     teamA: '',
     teamB: '',
-    score: ''
+    playerA1: '',
+    playerA2: '',
+    playerB1: '',
+    playerB2: '',
+    score: '',
+    isCustomTitle: false
   };
 
   state.splits.push(newSplit);
@@ -1232,6 +1301,14 @@ function renderSplitsList() {
       </div>
     ` : '';
 
+    const getOptionsHtml = (selectedPlayer) => {
+      let html = `<option value="none" ${(!selectedPlayer || selectedPlayer === 'none') ? 'selected' : ''}>-- None --</option>`;
+      state.players.forEach(p => {
+        html += `<option value="${escapeHtml(p)}" ${p === selectedPlayer ? 'selected' : ''}>${escapeHtml(p)}</option>`;
+      });
+      return html;
+    };
+
     card.innerHTML = `
       <div class="split-card-header">
         <span class="split-card-title">🏸 Game ${idx + 1}</span>
@@ -1239,14 +1316,30 @@ function renderSplitsList() {
       </div>
       
       <div class="split-card-form">
-        <input type="text" class="title-input" placeholder="Title (e.g. Game 1 - Finals)" value="${s.title}">
+        <input type="text" class="title-input" placeholder="Title (e.g. Game 1 - Finals)" value="${escapeHtml(s.title)}">
         
-        <div class="form-row">
-          <input type="text" class="teama-input" placeholder="Team A Players" value="${s.teamA}">
-          <input type="text" class="teamb-input" placeholder="Team B Players" value="${s.teamB}">
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: 2px;">Team A Players</div>
+        <div class="form-row" style="gap: 4px; display: flex;">
+          <select class="playera1-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerA1)}
+          </select>
+          <select class="playera2-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerA2)}
+          </select>
+        </div>
+
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: 2px;">Team B Players</div>
+        <div class="form-row" style="gap: 4px; display: flex;">
+          <select class="playerb1-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerB1)}
+          </select>
+          <select class="playerb2-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerB2)}
+          </select>
         </div>
         
-        <input type="text" class="score-input" placeholder="Score (e.g. 21-19)" value="${s.score}">
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: 2px;">Game Score</div>
+        <input type="text" class="score-input" placeholder="Score (e.g. 21-19)" value="${escapeHtml(s.score)}">
       </div>
       
       ${statusContainerHtml}
@@ -1260,10 +1353,43 @@ function renderSplitsList() {
     `;
 
     // Hook events inside card
-    card.querySelector('.title-input').addEventListener('input', (e) => { s.title = e.target.value; drawTimelineCanvas(); });
-    card.querySelector('.teama-input').addEventListener('input', (e) => { s.teamA = e.target.value; });
-    card.querySelector('.teamb-input').addEventListener('input', (e) => { s.teamB = e.target.value; });
-    card.querySelector('.score-input').addEventListener('input', (e) => { s.score = e.target.value; });
+    card.querySelector('.title-input').addEventListener('input', (e) => {
+      s.title = e.target.value;
+      s.isCustomTitle = true;
+      drawTimelineCanvas();
+    });
+
+    const updateTitleField = () => {
+      const titleInput = card.querySelector('.title-input');
+      if (titleInput) {
+        titleInput.value = s.title;
+      }
+      drawTimelineCanvas();
+    };
+
+    card.querySelector('.playera1-select').addEventListener('change', (e) => {
+      s.playerA1 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+    });
+    card.querySelector('.playera2-select').addEventListener('change', (e) => {
+      s.playerA2 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+    });
+    card.querySelector('.playerb1-select').addEventListener('change', (e) => {
+      s.playerB1 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+    });
+    card.querySelector('.playerb2-select').addEventListener('change', (e) => {
+      s.playerB2 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+    });
+    card.querySelector('.score-input').addEventListener('input', (e) => {
+      s.score = e.target.value;
+    });
 
     card.querySelector('.btn-preview-split').addEventListener('click', () => {
       seekGlobal(s.start);
@@ -1368,6 +1494,7 @@ async function saveProjectSession() {
     dirPath: state.dirPath,
     projectData: {
       splits: state.splits,
+      players: state.players,
       youtubeSettings: state.youtubeSettings,
       files: state.files.map(f => ({ name: f.name, path: f.path, duration: f.duration }))
     }
@@ -1390,6 +1517,86 @@ async function saveProjectSession() {
   } catch (err) {
     logToConsole(`[ERROR] Save project splits failed: ${err.message}`, 'error');
     alert(`Failed to save project splits: ${err.message}`);
+  }
+}
+
+/* Player Management & Title Auto-Derivation Helpers */
+function escapeHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function handleAddPlayerFromInput() {
+  const name = elements.inputNewPlayer.value.trim();
+  if (!name) return;
+  if (state.players.includes(name)) {
+    alert('Player already exists in the pool.');
+    return;
+  }
+  state.players.push(name);
+  elements.inputNewPlayer.value = '';
+  renderPlayersPool();
+  renderSplitsList();
+  saveProjectSession();
+}
+
+function removePlayer(name) {
+  state.players = state.players.filter(p => p !== name);
+  state.splits.forEach(s => {
+    if (s.playerA1 === name) s.playerA1 = '';
+    if (s.playerA2 === name) s.playerA2 = '';
+    if (s.playerB1 === name) s.playerB1 = '';
+    if (s.playerB2 === name) s.playerB2 = '';
+    updateSplitTeamsAndTitle(s);
+  });
+  renderPlayersPool();
+  renderSplitsList();
+  drawTimelineCanvas();
+  saveProjectSession();
+}
+
+function renderPlayersPool() {
+  if (!elements.playersListTags) return;
+  elements.playersListTags.innerHTML = '';
+  elements.playersCount.textContent = state.players.length;
+  
+  if (state.players.length === 0) {
+    elements.playersListTags.innerHTML = '<div style="font-size:11px; color:var(--text-muted); font-style:italic; width: 100%;">No players added yet. Add players to begin.</div>';
+    return;
+  }
+  
+  state.players.forEach(name => {
+    const tag = document.createElement('span');
+    tag.className = 'player-tag';
+    tag.innerHTML = `${escapeHtml(name)} <span class="player-tag-remove" data-name="${escapeHtml(name)}">×</span>`;
+    
+    tag.querySelector('.player-tag-remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removePlayer(name);
+    });
+    
+    elements.playersListTags.appendChild(tag);
+  });
+}
+
+function updateSplitTeamsAndTitle(s) {
+  const partsA = [s.playerA1, s.playerA2].filter(p => p && p !== 'none');
+  const partsB = [s.playerB1, s.playerB2].filter(p => p && p !== 'none');
+  
+  s.teamA = partsA.join('/');
+  s.teamB = partsB.join('/');
+  
+  if (!s.isCustomTitle) {
+    if (s.teamA || s.teamB) {
+      s.title = `${s.teamA || 'Team A'} vs ${s.teamB || 'Team B'}`;
+    } else {
+      s.title = `Game ${state.splits.indexOf(s) + 1}`;
+    }
   }
 }
 
