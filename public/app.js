@@ -1659,46 +1659,63 @@ async function exportGames() {
     }
   };
 
-  try {
-    // Send request using native fetch, and read chunked stream
-    const response = await fetch('/api/export', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+  let attempt = 0;
+  const maxAttempts = 3;
+  let finishedSuccessfully = false;
 
-    if (response.status !== 200) {
-      throw new Error(`Export API error: ${response.statusText}`);
-    }
+  while (attempt < maxAttempts && !finishedSuccessfully) {
+    attempt++;
+    try {
+      if (attempt > 1) {
+        logToConsole(`[SYSTEM] Connection lost or interrupted. Retrying in 4 seconds (Attempt ${attempt}/${maxAttempts})...`, 'warning');
+        await new Promise(resolve => setTimeout(resolve, 4000));
+      }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
+      // Send request using native fetch, and read chunked stream
+      const response = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      if (response.status !== 200) {
+        throw new Error(`Export API error: ${response.statusText}`);
+      }
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // save remaining partial chunk
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
 
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const data = JSON.parse(line);
-            handleExportProgressChunk(data);
-          } catch (e) {
-            console.error('Failed to parse progress chunk:', line, e);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // save remaining partial chunk
+
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const data = JSON.parse(line);
+              handleExportProgressChunk(data);
+            } catch (e) {
+              console.error('Failed to parse progress chunk:', line, e);
+            }
           }
         }
       }
-    }
 
-  } catch (err) {
-    logToConsole(`[CRITICAL ERROR] Export crashed: ${err.message}`, 'error');
-    elements.consoleProgressFill.style.background = '#EF4444';
-    elements.consoleProgressText.textContent = 'EXPORT FAILED';
+      finishedSuccessfully = true;
+
+    } catch (err) {
+      console.error('Export fetch / stream reader failed:', err);
+      if (attempt >= maxAttempts) {
+        logToConsole(`[CRITICAL ERROR] Export crashed: ${err.message}`, 'error');
+        elements.consoleProgressFill.style.background = '#EF4444';
+        elements.consoleProgressText.textContent = 'EXPORT FAILED';
+      }
+    }
   } finally {
     state.isExporting = false;
     elements.btnExportAll.disabled = false;
