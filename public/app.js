@@ -208,6 +208,23 @@ function init() {
     });
   }
 
+  const btnModalConnectNew = document.getElementById('btn-modal-connect-new-channel');
+  if (btnModalConnectNew) {
+    btnModalConnectNew.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeYtModal();
+      // Show welcome overlay
+      const overlay = document.getElementById('auth-welcome-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        overlay.classList.remove('hidden');
+        // Switch to welcome screen new profile directly
+        document.getElementById('welcome-screen-select').style.display = 'none';
+        document.getElementById('welcome-screen-new').style.display = 'block';
+      }
+    });
+  }
+
   // Try scanning if directory in URL search params (useful for reload)
   const urlParams = new URLSearchParams(window.location.search);
   const paramDir = urlParams.get('dir');
@@ -2301,11 +2318,14 @@ async function fetchProfiles() {
       if (active) {
         state.youtubeSettings.channelName = active.name;
         state.youtubeSettings.clientId = active.clientId || '';
-        // If active profile exists, automatically hide welcome overlay on reload
-        const overlay = document.getElementById('auth-welcome-overlay');
-        if (overlay && !overlay.classList.contains('hidden')) {
-          overlay.style.display = 'none';
-          overlay.classList.add('hidden');
+        // If active profile exists, automatically hide welcome overlay on reload ONLY if directory is loaded
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('dir')) {
+          const overlay = document.getElementById('auth-welcome-overlay');
+          if (overlay && !overlay.classList.contains('hidden')) {
+            overlay.style.display = 'none';
+            overlay.classList.add('hidden');
+          }
         }
       }
     }
