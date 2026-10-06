@@ -30,7 +30,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Helper to run exec as a promise
 function execPromise(command) {
   return new Promise((resolve, reject) => {
-    exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    exec(command, { maxBuffer: 1024 * 1024 * 10, stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout, stderr) => {
       if (error) {
         reject(error);
       } else {
@@ -116,7 +116,7 @@ app.get('/api/list-dirs', (req, res) => {
 app.get('/api/browse', (req, res) => {
   const script = `osascript -e 'POSIX path of (choose folder with prompt "Select your GoPro videos folder:")'`;
   
-  exec(script, (error, stdout, stderr) => {
+  exec(script, { stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout, stderr) => {
     if (error) {
       if (error.message.includes('-128')) {
         return res.json({ cancelled: true });
@@ -386,7 +386,7 @@ app.post('/api/save-project', (req, res) => {
  */
 function spawnPromise(command, args, onLog) {
   return new Promise((resolve, reject) => {
-    const process = spawn(command, args);
+    const process = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let errorOutput = '';
 
     process.stdout.on('data', (data) => {

@@ -100,6 +100,7 @@ const elements = {
   // Export Hub
   exportHubCard: document.getElementById('export-hub-card'),
   btnExportAll: document.getElementById('btn-export-all'),
+  btnRetryFailedExports: document.getElementById('btn-retry-failed-exports'),
   
   // Console Logging
   exportConsolePanel: document.getElementById('export-console-panel'),
@@ -339,6 +340,9 @@ function init() {
 
   // Export & Console
   elements.btnExportAll.addEventListener('click', exportGames);
+  if (elements.btnRetryFailedExports) {
+    elements.btnRetryFailedExports.addEventListener('click', retryAllFailedGames);
+  }
   elements.btnCloseConsole.addEventListener('click', () => {
     elements.exportConsolePanel.style.display = 'none';
   });
@@ -1249,6 +1253,11 @@ function addSplitSegment() {
 function renderSplitsList() {
   elements.splitsCount.textContent = state.splits.length;
   
+  const hasFailedExports = state.splits.some(s => s.exportStatus === 'failed');
+  if (elements.btnRetryFailedExports) {
+    elements.btnRetryFailedExports.style.display = hasFailedExports ? 'block' : 'none';
+  }
+
   if (state.splits.length === 0) {
     elements.splitsEmptyState.style.display = 'flex';
     return;
@@ -1259,6 +1268,14 @@ function renderSplitsList() {
   // Remove only split cards, do NOT delete the empty-state
   const existingCards = elements.splitsListViewport.querySelectorAll('.split-card');
   existingCards.forEach(c => c.remove());
+
+  const getOptionsHtml = (selectedPlayer) => {
+    let html = `<option value="none" ${(!selectedPlayer || selectedPlayer === 'none') ? 'selected' : ''}>-- None --</option>`;
+    state.players.forEach(p => {
+      html += `<option value="${escapeHtml(p)}" ${p === selectedPlayer ? 'selected' : ''}>${escapeHtml(p)}</option>`;
+    });
+    return html;
+  };
 
   state.splits.forEach((s, idx) => {
     const duration = s.end - s.start;
@@ -1277,7 +1294,7 @@ function renderSplitsList() {
     } else if (expStatus === 'completed') {
       exportBadgeHtml = `<span class="split-badge completed">✅ Exported</span>`;
     } else if (expStatus === 'failed') {
-      exportBadgeHtml = `<span class="split-badge failed">❌ Failed</span>`;
+      exportBadgeHtml = `<span class="split-badge failed">❌ Export Failed</span>`;
     }
     
     let uploadBadgeHtml = '';
@@ -1299,6 +1316,11 @@ function renderSplitsList() {
       }
     }
 
+    let retryExportBtnHtml = '';
+    if (expStatus === 'failed') {
+      retryExportBtnHtml = `<button class="btn-split-action btn-retry-export" style="background: rgba(239, 68, 68, 0.2); border: 1px solid #EF4444; color: #FCA5A5; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer;" title="Retry Exporting this Game">🔄 Retry Export</button>`;
+    }
+
     const showStatusContainer = expStatus !== 'idle';
     const statusContainerHtml = showStatusContainer ? `
       <div class="split-status-container">
@@ -1317,14 +1339,6 @@ function renderSplitsList() {
         ` : ''}
       </div>
     ` : '';
-
-    const getOptionsHtml = (selectedPlayer) => {
-      let html = `<option value="none" ${(!selectedPlayer || selectedPlayer === 'none') ? 'selected' : ''}>-- None --</option>`;
-      state.players.forEach(p => {
-        html += `<option value="${escapeHtml(p)}" ${p === selectedPlayer ? 'selected' : ''}>${escapeHtml(p)}</option>`;
-      });
-      return html;
-    };
 
     card.innerHTML = `
       <div class="split-card-header">
@@ -1362,8 +1376,9 @@ function renderSplitsList() {
       ${statusContainerHtml}
       
       <div class="split-card-actions">
-        <div class="split-card-btn-grp">
+        <div class="split-card-btn-grp" style="display: flex; gap: 6px; align-items: center;">
           <button class="btn-split-action btn-preview-split" title="Jump to Game Start">▶️ Preview</button>
+          ${retryExportBtnHtml}
         </div>
         <button class="btn-split-action delete btn-delete-split" title="Remove Game Split">🗑️ Delete</button>
       </div>
@@ -1412,6 +1427,13 @@ function renderSplitsList() {
       seekGlobal(s.start);
       if (!state.isPlaying) togglePlayPause();
     });
+
+    const btnRetryExport = card.querySelector('.btn-retry-export');
+    if (btnRetryExport) {
+      btnRetryExport.addEventListener('click', () => {
+        retryExportSingleGame(idx);
+      });
+    }
 
     card.querySelector('.btn-delete-split').addEventListener('click', () => {
       state.splits.splice(idx, 1);
@@ -1680,57 +1702,59 @@ async function exportGames() {
   const maxAttempts = 3;
   let finishedSuccessfully = false;
 
-  while (attempt < maxAttempts && !finishedSuccessfully) {
-    attempt++;
-    try {
-      if (attempt > 1) {
-        logToConsole(`[SYSTEM] Connection lost or interrupted. Retrying in 4 seconds (Attempt ${attempt}/${maxAttempts})...`, 'warning');
-        await new Promise(resolve => setTimeout(resolve, 4000));
-      }
+  try {
+    while (attempt < maxAttempts && !finishedSuccessfully) {
+      attempt++;
+      try {
+        if (attempt > 1) {
+          logToConsole(`[SYSTEM] Connection lost or interrupted. Retrying in 4 seconds (Attempt ${attempt}/${maxAttempts})...`, 'warning');
+          await new Promise(resolve => setTimeout(resolve, 4000));
+        }
 
-      // Send request using native fetch, and read chunked stream
-      const response = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+        // Send request using native fetch, and read chunked stream
+        const response = await fetch('/api/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
 
-      if (response.status !== 200) {
-        throw new Error(`Export API error: ${response.statusText}`);
-      }
+        if (response.status !== 200) {
+          throw new Error(`Export API error: ${response.statusText}`);
+        }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // save remaining partial chunk
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // save remaining partial chunk
 
-        for (const line of lines) {
-          if (line.trim()) {
-            try {
-              const data = JSON.parse(line);
-              handleExportProgressChunk(data);
-            } catch (e) {
-              console.error('Failed to parse progress chunk:', line, e);
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const data = JSON.parse(line);
+                handleExportProgressChunk(data);
+              } catch (e) {
+                console.error('Failed to parse progress chunk:', line, e);
+              }
             }
           }
         }
-      }
 
-      finishedSuccessfully = true;
+        finishedSuccessfully = true;
 
-    } catch (err) {
-      console.error('Export fetch / stream reader failed:', err);
-      if (attempt >= maxAttempts) {
-        logToConsole(`[CRITICAL ERROR] Export crashed: ${err.message}`, 'error');
-        elements.consoleProgressFill.style.background = '#EF4444';
-        elements.consoleProgressText.textContent = 'EXPORT FAILED';
+      } catch (err) {
+        console.error('Export fetch / stream reader failed:', err);
+        if (attempt >= maxAttempts) {
+          logToConsole(`[CRITICAL ERROR] Export crashed: ${err.message}`, 'error');
+          elements.consoleProgressFill.style.background = '#EF4444';
+          elements.consoleProgressText.textContent = 'EXPORT FAILED';
+        }
       }
     }
   } finally {
@@ -2578,6 +2602,49 @@ async function triggerWelcomeCreateMock() {
 
 // Expose deleteProfile globally for onclick bindings
 window.deleteProfile = deleteProfile;
+
+/**
+ * Retry exporting a single game split
+ */
+async function retryExportSingleGame(idx) {
+  if (state.isExporting) {
+    alert('An export process is already running. Please wait.');
+    return;
+  }
+  const targetSplit = state.splits[idx];
+  if (!targetSplit) return;
+
+  logToConsole(`[SYSTEM] Resetting status and retrying export for Game ${idx + 1}...`, 'info');
+  targetSplit.exportStatus = 'idle';
+  renderSplitsList();
+  await exportGames();
+}
+
+/**
+ * Batch retry all failed game exports
+ */
+async function retryAllFailedGames() {
+  if (state.isExporting) {
+    alert('An export process is already running. Please wait.');
+    return;
+  }
+  let count = 0;
+  state.splits.forEach(s => {
+    if (s.exportStatus === 'failed') {
+      s.exportStatus = 'idle';
+      count++;
+    }
+  });
+
+  if (count === 0) {
+    showBannerNotification('No failed exports found to retry.');
+    return;
+  }
+
+  logToConsole(`[SYSTEM] Resetting status and retrying export for ${count} failed game(s)...`, 'info');
+  renderSplitsList();
+  await exportGames();
+}
 
 // Start client loop
 window.onload = init;

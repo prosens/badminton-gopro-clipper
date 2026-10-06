@@ -30,7 +30,7 @@ if [ -d "$APP_DIR" ]; then
     cd "$APP_DIR"
     
     # Start node in the background and redirect output to logs
-    node server.js > app_runner.log 2>&1 &
+    node server.js < /dev/null > app_runner.log 2>&1 &
     
     # Wait for startup
     sleep 1.5
