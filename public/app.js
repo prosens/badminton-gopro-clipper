@@ -12,6 +12,7 @@ const state = {
   virtualPlayhead: 0,   // Playhead position in global timeline (seconds)
   
   splits: [],           // List of Game splits { start, end, title, teamA, teamB, score }
+  players: [],          // List of Session Players
   markers: {
     start: null,        // Global time (seconds)
     end: null           // Global time (seconds)
@@ -69,7 +70,22 @@ const elements = {
   btnMarkStart: document.getElementById('btn-mark-start'),
   btnMarkEnd: document.getElementById('btn-mark-end'),
   btnAddSplit: document.getElementById('btn-add-split'),
+  btnAutoDetect: document.getElementById('btn-auto-detect'),
   markerFeedback: document.getElementById('marker-feedback'),
+  
+  // Court Calibration UI Elements
+  courtCalibrationHeader: document.getElementById('court-calibration-header'),
+  courtSlidersBody: document.getElementById('court-sliders-body'),
+  courtToggleIcon: document.getElementById('court-toggle-icon'),
+  sliderCourtLeft: document.getElementById('slider-court-left'),
+  sliderCourtRight: document.getElementById('slider-court-right'),
+  sliderCourtTop: document.getElementById('slider-court-top'),
+  sliderCourtBottom: document.getElementById('slider-court-bottom'),
+  lblCourtLeft: document.getElementById('lbl-court-left'),
+  lblCourtRight: document.getElementById('lbl-court-right'),
+  lblCourtTop: document.getElementById('lbl-court-top'),
+  lblCourtBottom: document.getElementById('lbl-court-bottom'),
+  courtOverlay: document.getElementById('court-overlay'),
   
   // Sidebar Files
   filesDetailsCard: document.getElementById('files-details-card'),
@@ -78,6 +94,15 @@ const elements = {
   filesMiniList: document.getElementById('files-mini-list'),
   totalFilesCount: document.getElementById('total-files-count'),
   filesSummaryText: document.getElementById('files-summary-text'),
+  
+  // Players Pool
+  playersCard: document.getElementById('players-card'),
+  playersHeader: document.getElementById('players-header'),
+  playersBody: document.getElementById('players-body'),
+  inputNewPlayer: document.getElementById('input-new-player'),
+  btnAddPlayer: document.getElementById('btn-add-player'),
+  playersListTags: document.getElementById('players-list-tags'),
+  playersCount: document.getElementById('players-count'),
   
   // Sidebar Splits
   splitsEditorCard: document.getElementById('splits-editor-card'),
@@ -90,6 +115,7 @@ const elements = {
   // Export Hub
   exportHubCard: document.getElementById('export-hub-card'),
   btnExportAll: document.getElementById('btn-export-all'),
+  btnRetryFailedExports: document.getElementById('btn-retry-failed-exports'),
   
   // Console Logging
   exportConsolePanel: document.getElementById('export-console-panel'),
@@ -223,6 +249,20 @@ function init() {
     elements.filesListBody.style.display = elements.filesListHeader.classList.contains('collapsed') ? 'none' : 'block';
   });
 
+  // Collapsible players pool list
+  elements.playersHeader.addEventListener('click', () => {
+    elements.playersHeader.classList.toggle('collapsed');
+    elements.playersBody.style.display = elements.playersHeader.classList.contains('collapsed') ? 'none' : 'block';
+  });
+
+  // Players pool input listeners
+  elements.btnAddPlayer.addEventListener('click', handleAddPlayerFromInput);
+  elements.inputNewPlayer.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      handleAddPlayerFromInput();
+    }
+  });
+
   // Playback Control Handlers
   elements.btnPlayPause.addEventListener('click', togglePlayPause);
   elements.btnBack5s.addEventListener('click', () => seekRelative(-5));
@@ -290,6 +330,45 @@ function init() {
   elements.btnMarkStart.addEventListener('click', markGameStart);
   elements.btnMarkEnd.addEventListener('click', markGameEnd);
   elements.btnAddSplit.addEventListener('click', addSplitSegment);
+  if (elements.btnAutoDetect) {
+    elements.btnAutoDetect.addEventListener('click', triggerAutoDetect);
+  }
+  
+  // Court Calibration Interactions
+  if (elements.courtCalibrationHeader) {
+    elements.courtCalibrationHeader.addEventListener('click', () => {
+      const isCollapsed = elements.courtSlidersBody.style.display === 'none';
+      if (isCollapsed) {
+        elements.courtSlidersBody.style.display = 'flex';
+        elements.courtToggleIcon.textContent = '▲ Hide Calibration Sliders';
+        elements.courtOverlay.style.display = 'block';
+        updateCourtOverlayDimensions();
+      } else {
+        elements.courtSlidersBody.style.display = 'none';
+        elements.courtToggleIcon.textContent = '▼ Show Calibration Sliders';
+        elements.courtOverlay.style.display = 'none';
+      }
+    });
+
+    const sliders = [
+      elements.sliderCourtLeft,
+      elements.sliderCourtRight,
+      elements.sliderCourtTop,
+      elements.sliderCourtBottom
+    ];
+
+    sliders.forEach(slider => {
+      if (slider) {
+        slider.addEventListener('input', () => {
+          elements.lblCourtLeft.textContent = elements.sliderCourtLeft.value + '%';
+          elements.lblCourtRight.textContent = elements.sliderCourtRight.value + '%';
+          elements.lblCourtTop.textContent = elements.sliderCourtTop.value + '%';
+          elements.lblCourtBottom.textContent = elements.sliderCourtBottom.value + '%';
+          updateCourtOverlayDimensions();
+        });
+      }
+    });
+  }
   
   // Clear/Save Splits
   elements.btnSaveProject.addEventListener('click', saveProjectSession);
@@ -297,6 +376,9 @@ function init() {
 
   // Export & Console
   elements.btnExportAll.addEventListener('click', exportGames);
+  if (elements.btnRetryFailedExports) {
+    elements.btnRetryFailedExports.addEventListener('click', retryAllFailedGames);
+  }
   elements.btnCloseConsole.addEventListener('click', () => {
     elements.exportConsolePanel.style.display = 'none';
   });
@@ -579,6 +661,11 @@ async function scanDirectory(pathStr) {
         state.splits = data.projectSession.splits;
         logToConsole(`[SYSTEM] Loaded ${state.splits.length} saved game splits from project session file.`, 'info');
       }
+      if (data.projectSession.players) {
+        state.players = data.projectSession.players;
+      } else {
+        state.players = [];
+      }
       if (data.projectSession.youtubeSettings) {
         state.youtubeSettings = data.projectSession.youtubeSettings;
         
@@ -588,6 +675,38 @@ async function scanDirectory(pathStr) {
           label.innerHTML = `<span class="yt-dot" style="background:#10B981;"></span> YouTube Channel: <strong>${state.youtubeSettings.channelName}</strong>`;
         }
       }
+
+      // Backward compatibility auto-parsing and setup
+      state.splits.forEach(s => {
+        if (s.playerA1 === undefined) s.playerA1 = '';
+        if (s.playerA2 === undefined) s.playerA2 = '';
+        if (s.playerB1 === undefined) s.playerB1 = '';
+        if (s.playerB2 === undefined) s.playerB2 = '';
+        if (s.isCustomTitle === undefined) s.isCustomTitle = false;
+
+        if (s.teamA && !s.playerA1 && !s.playerA2) {
+          const parts = s.teamA.split('/');
+          s.playerA1 = parts[0] || '';
+          s.playerA2 = parts[1] || '';
+          parts.forEach(p => {
+            if (p && p !== 'Team A' && !state.players.includes(p)) {
+              state.players.push(p);
+            }
+          });
+        }
+        if (s.teamB && !s.playerB1 && !s.playerB2) {
+          const parts = s.teamB.split('/');
+          s.playerB1 = parts[0] || '';
+          s.playerB2 = parts[1] || '';
+          parts.forEach(p => {
+            if (p && p !== 'Team B' && !state.players.includes(p)) {
+              state.players.push(p);
+            }
+          });
+        }
+      });
+    } else {
+      state.players = [];
     }
 
     // Toggle panel visibility
@@ -596,12 +715,19 @@ async function scanDirectory(pathStr) {
     elements.customPlayerControls.style.display = 'block';
     elements.timelineWorkspace.style.display = 'block';
     elements.filesDetailsCard.style.display = 'flex';
+    elements.playersCard.style.display = 'flex';
     elements.splitsEditorCard.style.display = 'flex';
     elements.exportHubCard.style.display = 'flex';
     elements.youtubeCard.style.display = 'flex';
 
+    if (elements.courtOverlay) {
+      elements.courtOverlay.style.display = 'none';
+      updateCourtOverlayDimensions();
+    }
+
     // Update files mini list sidebar
     renderFilesMiniList();
+    renderPlayersPool();
     renderSplitsList();
     updateTimelineIndicators();
 
@@ -834,6 +960,22 @@ function updatePlayheadPosition() {
 }
 
 /**
+ * Dynamically adjust dashed court overlay size and position
+ */
+function updateCourtOverlayDimensions() {
+  if (!elements.courtOverlay) return;
+  const left = parseFloat(elements.sliderCourtLeft.value) || 15;
+  const right = parseFloat(elements.sliderCourtRight.value) || 85;
+  const top = parseFloat(elements.sliderCourtTop.value) || 20;
+  const bottom = parseFloat(elements.sliderCourtBottom.value) || 90;
+
+  elements.courtOverlay.style.left = left + '%';
+  elements.courtOverlay.style.top = top + '%';
+  elements.courtOverlay.style.width = (right - left) + '%';
+  elements.courtOverlay.style.height = (bottom - top) + '%';
+}
+
+/**
  * Draw custom gorgeous visual timeline canvas
  */
 function drawTimelineCanvas() {
@@ -874,6 +1016,60 @@ function drawTimelineCanvas() {
       ctx.fillText(f.name, xStart + 8, height - 8);
     }
   });
+
+  // Draw MOTION GRAPH IF SAMPLES EXIST
+  if (state.motionSamples && state.motionSamples.length > 0) {
+    const samples = state.motionSamples;
+    const maxVal = Math.max(...samples.map(s => Math.max(s.motion, s.smoothed)), 5.0);
+    const chartHeight = height - 20;
+
+    // Draw raw motion as soft purple filled area
+    ctx.beginPath();
+    ctx.moveTo(0, chartHeight);
+    samples.forEach(s => {
+      const x = (s.time / state.virtualDuration) * width;
+      const y = chartHeight - (s.motion / maxVal) * (chartHeight - 12);
+      ctx.lineTo(x, y);
+    });
+    ctx.lineTo(width, chartHeight);
+    ctx.fillStyle = 'rgba(123, 44, 191, 0.08)';
+    ctx.fill();
+
+    // Draw smoothed motion as a distinct line
+    ctx.beginPath();
+    let first = true;
+    samples.forEach(s => {
+      const x = (s.time / state.virtualDuration) * width;
+      const y = chartHeight - (s.smoothed / maxVal) * (chartHeight - 12);
+      if (first) {
+        ctx.moveTo(x, y);
+        first = false;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.strokeStyle = 'rgba(123, 44, 191, 0.5)';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    // Draw threshold line
+    if (state.motionThreshold) {
+      const thresholdY = chartHeight - (state.motionThreshold / maxVal) * (chartHeight - 12);
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, thresholdY);
+      ctx.lineTo(width, thresholdY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Label the threshold
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.6)';
+      ctx.font = '600 8px "JetBrains Mono", monospace';
+      ctx.fillText('AUTO-THRESHOLD', 6, thresholdY - 4);
+    }
+  }
 
   // Draw ACTIVE GAME SEGMENTS (glowing green blocks)
   state.splits.forEach((split, index) => {
@@ -1055,7 +1251,12 @@ function addSplitSegment() {
     title: `Game ${newGameIndex}`,
     teamA: '',
     teamB: '',
-    score: ''
+    playerA1: '',
+    playerA2: '',
+    playerB1: '',
+    playerB2: '',
+    score: '',
+    isCustomTitle: false
   };
 
   state.splits.push(newSplit);
@@ -1084,11 +1285,141 @@ function addSplitSegment() {
 }
 
 /**
+ * Offline visual motion auto-detector trigger
+ */
+async function triggerAutoDetect() {
+  if (state.files.length === 0) {
+    alert('Please scan a directory and load some GoPro video files first.');
+    return;
+  }
+
+  if (state.splits.length > 0) {
+    const proceed = confirm('Auto-detection will analyze the video files and suggest splits, replacing your current manual splits. Do you want to proceed?');
+    if (!proceed) return;
+  }
+
+  elements.btnAutoDetect.disabled = true;
+  elements.btnAutoDetect.textContent = '⚡ Analyzing...';
+  
+  // Show system log console
+  elements.exportConsolePanel.style.display = 'block';
+  logToConsole('\n[SYSTEM] Starting offline motion auto-detection on video files...', 'info');
+  logToConsole('Extracting frames via FFmpeg and computing peaks & valleys. Please wait...', 'info');
+
+  try {
+    const response = await fetch('/api/auto-detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        files: state.files.map(f => ({ name: f.name, path: f.path, duration: f.duration })),
+        sampleInterval: 2,
+        crop: {
+          xStart: parseFloat(elements.sliderCourtLeft.value) || 15,
+          xEnd: parseFloat(elements.sliderCourtRight.value) || 85,
+          yStart: parseFloat(elements.sliderCourtTop.value) || 20,
+          yEnd: parseFloat(elements.sliderCourtBottom.value) || 90
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Server auto-detection request failed');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let chunkBuffer = '';
+    let result = null;
+    let lastLoggedPercent = -1;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      chunkBuffer += decoder.decode(value, { stream: true });
+      const lines = chunkBuffer.split('\n');
+      chunkBuffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.trim()) {
+          const chunk = JSON.parse(line);
+          
+          if (chunk.status === 'info') {
+            logToConsole(chunk.message, 'info');
+          } else if (chunk.status === 'progress') {
+            const pct = chunk.percent;
+            if (pct % 20 === 0 && pct !== lastLoggedPercent) {
+              logToConsole(`   → ${chunk.file}: processed ${pct}%`, 'info');
+              lastLoggedPercent = pct;
+            }
+          } else if (chunk.status === 'result') {
+            result = chunk.data;
+          } else if (chunk.status === 'error') {
+            throw new Error(chunk.message);
+          }
+        }
+      }
+    }
+
+    if (!result) {
+      throw new Error('Failed to retrieve auto-detection results from server stream.');
+    }
+    
+    if (result.samples && result.samples.length > 0) {
+      state.motionSamples = result.samples;
+      state.motionThreshold = result.threshold;
+    }
+
+    if (result.proposedGames && result.proposedGames.length > 0) {
+      state.splits = result.proposedGames.map((game, idx) => ({
+        start: game.start,
+        end: game.end,
+        title: `Game ${idx + 1}`,
+        teamA: '',
+        teamB: '',
+        playerA1: '',
+        playerA2: '',
+        playerB1: '',
+        playerB2: '',
+        score: '',
+        isCustomTitle: false,
+        exportStatus: 'idle',
+        uploadStatus: 'idle',
+        videoPath: '',
+        youtubeUrl: '',
+        youtubeId: ''
+      }));
+
+      logToConsole(`✓ [SYSTEM] Auto-detection completed! Populated ${state.splits.length} badminton games on timeline.`, 'success');
+      showHudToast(`⚡ Auto-detected ${state.splits.length} Games!`);
+    } else {
+      logToConsole('⚠️ [SYSTEM] Auto-detection completed but found no games matching the duration criteria (> 5 mins). Try tweaking the timeline manually.', 'warning');
+      alert('Auto-detection completed but found no distinct games matching the duration criteria. You can still set splits manually!');
+    }
+
+    renderSplitsList();
+    drawTimelineCanvas();
+
+  } catch (error) {
+    logToConsole(`❌ [ERROR] Auto-detect failed: ${error.message}`, 'error');
+    alert(`Auto-detection failed: ${error.message}`);
+  } finally {
+    elements.btnAutoDetect.disabled = false;
+    elements.btnAutoDetect.textContent = '⚡ Auto-Detect Games';
+  }
+}
+
+/**
  * Render Sidebar Game Cards
  */
 function renderSplitsList() {
   elements.splitsCount.textContent = state.splits.length;
   
+  const hasFailedExports = state.splits.some(s => s.exportStatus === 'failed');
+  if (elements.btnRetryFailedExports) {
+    elements.btnRetryFailedExports.style.display = hasFailedExports ? 'block' : 'none';
+  }
+
   if (state.splits.length === 0) {
     elements.splitsEmptyState.style.display = 'flex';
     return;
@@ -1099,6 +1430,14 @@ function renderSplitsList() {
   // Remove only split cards, do NOT delete the empty-state
   const existingCards = elements.splitsListViewport.querySelectorAll('.split-card');
   existingCards.forEach(c => c.remove());
+
+  const getOptionsHtml = (selectedPlayer) => {
+    let html = `<option value="none" ${(!selectedPlayer || selectedPlayer === 'none') ? 'selected' : ''}>-- None --</option>`;
+    state.players.forEach(p => {
+      html += `<option value="${escapeHtml(p)}" ${p === selectedPlayer ? 'selected' : ''}>${escapeHtml(p)}</option>`;
+    });
+    return html;
+  };
 
   state.splits.forEach((s, idx) => {
     const duration = s.end - s.start;
@@ -1117,7 +1456,7 @@ function renderSplitsList() {
     } else if (expStatus === 'completed') {
       exportBadgeHtml = `<span class="split-badge completed">✅ Exported</span>`;
     } else if (expStatus === 'failed') {
-      exportBadgeHtml = `<span class="split-badge failed">❌ Failed</span>`;
+      exportBadgeHtml = `<span class="split-badge failed">❌ Export Failed</span>`;
     }
     
     let uploadBadgeHtml = '';
@@ -1137,6 +1476,11 @@ function renderSplitsList() {
       } else {
         uploadActionHtml = `<button class="btn-upload-split btn-start-upload" title="Upload to YouTube">📤 Upload to YouTube</button>`;
       }
+    }
+
+    let retryExportBtnHtml = '';
+    if (expStatus === 'failed') {
+      retryExportBtnHtml = `<button class="btn-split-action btn-retry-export" style="background: rgba(239, 68, 68, 0.2); border: 1px solid #EF4444; color: #FCA5A5; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer;" title="Retry Exporting this Game">🔄 Retry Export</button>`;
     }
 
     const showStatusContainer = expStatus !== 'idle';
@@ -1165,36 +1509,98 @@ function renderSplitsList() {
       </div>
       
       <div class="split-card-form">
-        <input type="text" class="title-input" placeholder="Title (e.g. Game 1 - Finals)" value="${s.title}">
+        <input type="text" class="title-input" placeholder="Title (e.g. Game 1 - Finals)" value="${escapeHtml(s.title)}">
         
-        <div class="form-row">
-          <input type="text" class="teama-input" placeholder="Team A Players" value="${s.teamA}">
-          <input type="text" class="teamb-input" placeholder="Team B Players" value="${s.teamB}">
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: 2px;">Team A Players</div>
+        <div class="form-row" style="gap: 4px; display: flex;">
+          <select class="playera1-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerA1)}
+          </select>
+          <select class="playera2-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerA2)}
+          </select>
+        </div>
+
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: 2px;">Team B Players</div>
+        <div class="form-row" style="gap: 4px; display: flex;">
+          <select class="playerb1-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerB1)}
+          </select>
+          <select class="playerb2-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+            ${getOptionsHtml(s.playerB2)}
+          </select>
         </div>
         
-        <input type="text" class="score-input" placeholder="Score (e.g. 21-19)" value="${s.score}">
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: 2px;">Game Score</div>
+        <input type="text" class="score-input" placeholder="Score (e.g. 21-19)" value="${escapeHtml(s.score)}">
       </div>
       
       ${statusContainerHtml}
       
       <div class="split-card-actions">
-        <div class="split-card-btn-grp">
+        <div class="split-card-btn-grp" style="display: flex; gap: 6px; align-items: center;">
           <button class="btn-split-action btn-preview-split" title="Jump to Game Start">▶️ Preview</button>
+          ${retryExportBtnHtml}
         </div>
         <button class="btn-split-action delete btn-delete-split" title="Remove Game Split">🗑️ Delete</button>
       </div>
     `;
 
     // Hook events inside card
-    card.querySelector('.title-input').addEventListener('input', (e) => { s.title = e.target.value; drawTimelineCanvas(); });
-    card.querySelector('.teama-input').addEventListener('input', (e) => { s.teamA = e.target.value; });
-    card.querySelector('.teamb-input').addEventListener('input', (e) => { s.teamB = e.target.value; });
-    card.querySelector('.score-input').addEventListener('input', (e) => { s.score = e.target.value; });
+    card.querySelector('.title-input').addEventListener('input', (e) => {
+      s.title = e.target.value;
+      s.isCustomTitle = true;
+      drawTimelineCanvas();
+    });
+
+    const updateTitleField = () => {
+      const titleInput = card.querySelector('.title-input');
+      if (titleInput) {
+        titleInput.value = s.title;
+      }
+      drawTimelineCanvas();
+    };
+
+    card.querySelector('.playera1-select').addEventListener('change', (e) => {
+      s.playerA1 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+      saveProjectSession();
+    });
+    card.querySelector('.playera2-select').addEventListener('change', (e) => {
+      s.playerA2 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+      saveProjectSession();
+    });
+    card.querySelector('.playerb1-select').addEventListener('change', (e) => {
+      s.playerB1 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+      saveProjectSession();
+    });
+    card.querySelector('.playerb2-select').addEventListener('change', (e) => {
+      s.playerB2 = e.target.value;
+      updateSplitTeamsAndTitle(s);
+      updateTitleField();
+      saveProjectSession();
+    });
+    card.querySelector('.score-input').addEventListener('input', (e) => {
+      s.score = e.target.value;
+      saveProjectSession();
+    });
 
     card.querySelector('.btn-preview-split').addEventListener('click', () => {
       seekGlobal(s.start);
       if (!state.isPlaying) togglePlayPause();
     });
+
+    const btnRetryExport = card.querySelector('.btn-retry-export');
+    if (btnRetryExport) {
+      btnRetryExport.addEventListener('click', () => {
+        retryExportSingleGame(idx);
+      });
+    }
 
     card.querySelector('.btn-delete-split').addEventListener('click', () => {
       state.splits.splice(idx, 1);
@@ -1294,6 +1700,7 @@ async function saveProjectSession() {
     dirPath: state.dirPath,
     projectData: {
       splits: state.splits,
+      players: state.players,
       youtubeSettings: state.youtubeSettings
     }
   };
@@ -1987,6 +2394,9 @@ function showBannerNotification(text) {
 async function fetchProfiles() {
   try {
     const response = await fetch('/api/youtube-profiles');
+    if (!response.ok) {
+      throw new Error(`Server returned status ${response.status}`);
+    }
     const data = await response.json();
     state.profiles = data.profiles;
     state.activeProfileId = data.activeProfileId;
@@ -2011,6 +2421,16 @@ async function fetchProfiles() {
     }
   } catch (err) {
     console.error('Error fetching global profiles:', err.message);
+    const container = document.getElementById('welcome-profiles-list');
+    if (container) {
+      container.innerHTML = `
+        <div style="color:var(--color-accent); padding:20px; text-align:center; font-size:12px; background:rgba(255,0,127,0.06); border-radius:var(--radius-md); border:1px solid var(--color-accent); width:100%; box-sizing:border-box; line-height:1.4;">
+          <span style="font-size:20px; display:block; margin-bottom:6px;">⚠️</span>
+          <strong>Failed to load profiles:</strong> ${err.message}<br>
+          <span style="font-size:10px; margin-top:5px; display:block; color:var(--text-muted);">Please verify the backend server is running on <a href="http://localhost:4001" target="_blank" style="color:var(--color-primary); font-weight:bold; text-decoration:underline;">port 4001</a> and refresh the page.</span>
+        </div>
+      `;
+    }
   }
 }
 
@@ -2256,8 +2676,131 @@ async function triggerWelcomeCreateMock() {
   }
 }
 
+/* Player Management & Title Auto-Derivation Helpers */
+function escapeHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function handleAddPlayerFromInput() {
+  const name = elements.inputNewPlayer.value.trim();
+  if (!name) return;
+  if (state.players.includes(name)) {
+    alert('Player already exists in the pool.');
+    return;
+  }
+  state.players.push(name);
+  elements.inputNewPlayer.value = '';
+  renderPlayersPool();
+  renderSplitsList();
+  saveProjectSession();
+}
+
+function removePlayer(name) {
+  state.players = state.players.filter(p => p !== name);
+  state.splits.forEach(s => {
+    if (s.playerA1 === name) s.playerA1 = '';
+    if (s.playerA2 === name) s.playerA2 = '';
+    if (s.playerB1 === name) s.playerB1 = '';
+    if (s.playerB2 === name) s.playerB2 = '';
+    updateSplitTeamsAndTitle(s);
+  });
+  renderPlayersPool();
+  renderSplitsList();
+  drawTimelineCanvas();
+  saveProjectSession();
+}
+
+function renderPlayersPool() {
+  if (!elements.playersListTags) return;
+  elements.playersListTags.innerHTML = '';
+  elements.playersCount.textContent = state.players.length;
+  
+  if (state.players.length === 0) {
+    elements.playersListTags.innerHTML = '<div style="font-size:11px; color:var(--text-muted); font-style:italic; width: 100%;">No players added yet. Add players to begin.</div>';
+    return;
+  }
+  
+  state.players.forEach(name => {
+    const tag = document.createElement('span');
+    tag.className = 'player-tag';
+    tag.innerHTML = `${escapeHtml(name)} <span class="player-tag-remove" data-name="${escapeHtml(name)}">×</span>`;
+    
+    tag.querySelector('.player-tag-remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removePlayer(name);
+    });
+    
+    elements.playersListTags.appendChild(tag);
+  });
+}
+
+function updateSplitTeamsAndTitle(s) {
+  const partsA = [s.playerA1, s.playerA2].filter(p => p && p !== 'none');
+  const partsB = [s.playerB1, s.playerB2].filter(p => p && p !== 'none');
+  
+  s.teamA = partsA.join('/');
+  s.teamB = partsB.join('/');
+  
+  if (!s.isCustomTitle) {
+    if (s.teamA || s.teamB) {
+      s.title = `${s.teamA || 'Team A'} vs ${s.teamB || 'Team B'}`;
+    } else {
+      s.title = `Game ${state.splits.indexOf(s) + 1}`;
+    }
+  }
+}
+
 // Expose deleteProfile globally for onclick bindings
 window.deleteProfile = deleteProfile;
+
+/**
+ * Retry exporting a single game split
+ */
+async function retryExportSingleGame(idx) {
+  if (state.isExporting) {
+    alert('An export process is already running. Please wait.');
+    return;
+  }
+  const targetSplit = state.splits[idx];
+  if (!targetSplit) return;
+
+  logToConsole(`[SYSTEM] Resetting status and retrying export for Game ${idx + 1}...`, 'info');
+  targetSplit.exportStatus = 'idle';
+  renderSplitsList();
+  await exportGames();
+}
+
+/**
+ * Batch retry all failed game exports
+ */
+async function retryAllFailedGames() {
+  if (state.isExporting) {
+    alert('An export process is already running. Please wait.');
+    return;
+  }
+  let count = 0;
+  state.splits.forEach(s => {
+    if (s.exportStatus === 'failed') {
+      s.exportStatus = 'idle';
+      count++;
+    }
+  });
+
+  if (count === 0) {
+    showBannerNotification('No failed exports found to retry.');
+    return;
+  }
+
+  logToConsole(`[SYSTEM] Resetting status and retrying export for ${count} failed game(s)...`, 'info');
+  renderSplitsList();
+  await exportGames();
+}
 
 // Start client loop
 window.onload = init;

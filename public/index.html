@@ -116,6 +116,11 @@
             <video id="main-player" controls style="display: none;"></video>
             <div id="video-hud-toast" class="hud-toast" style="display: none;">🎯 Game Start Marked</div>
             
+            <!-- Dash bordered visual overlay for Court Calibration -->
+            <div id="court-overlay" style="display: none; border: 2px dashed var(--color-primary); box-shadow: 0 0 15px var(--color-primary-glow); background: rgba(0, 245, 212, 0.03); position: absolute; pointer-events: none; z-index: 5; box-sizing: border-box;">
+              <span style="position: absolute; top: -18px; left: 0; background: var(--color-primary); color: #000; font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 3px; font-family: 'Outfit', sans-serif; letter-spacing: 0.5px; white-space: nowrap;">🏸 TARGET SCAN ZONE</span>
+            </div>
+            
             <!-- Video Placeholder -->
             <div id="video-placeholder" class="video-placeholder">
               <div class="placeholder-content">
@@ -195,7 +200,60 @@
             <button class="btn btn-success btn-sm" id="btn-add-split">
               ➕ Add Split Segment
             </button>
+            <button class="btn btn-primary btn-sm" id="btn-auto-detect" title="Auto-detect game splits offline" style="margin-left: 8px;">
+              ⚡ Auto-Detect Games
+            </button>
             <span class="marker-feedback" id="marker-feedback">Start: --:-- | End: --:--</span>
+          </div>
+
+          <!-- Court Calibration Panel (Collapsible) -->
+          <div class="court-calibration-panel" id="court-calibration-panel" style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; margin-bottom: 10px;" id="court-calibration-header">
+              <h4 style="font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px;">
+                🎯 Target Court Calibration Zone <span style="font-size: 10px; color: var(--color-primary); background: rgba(0, 245, 212, 0.1); padding: 2px 6px; border-radius: 10px;">Offline Filter</span>
+              </h4>
+              <span id="court-toggle-icon" style="font-size: 10px; color: var(--text-muted);">▼ Show Calibration Sliders</span>
+            </div>
+            
+            <div id="court-sliders-body" style="display: none; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.15); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-bottom: 4px;">
+                Adjust sliders to frame ONLY the specific badminton court you want to analyze. This ignores motion from spectators, ceiling lights, or adjacent courts. Look at the dashed green outline on the video.
+              </p>
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <!-- Left/Right (Horizontal bounds) -->
+                <div>
+                  <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">
+                    <span>Left Boundary: <span id="lbl-court-left">15%</span></span>
+                  </div>
+                  <input type="range" id="slider-court-left" min="0" max="45" value="15" style="width: 100%; cursor: pointer;">
+                </div>
+                
+                <div>
+                  <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">
+                    <span>Right Boundary: <span id="lbl-court-right">85%</span></span>
+                  </div>
+                  <input type="range" id="slider-court-right" min="55" max="100" value="85" style="width: 100%; cursor: pointer;">
+                </div>
+              </div>
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 5px;">
+                <!-- Top/Bottom (Vertical bounds) -->
+                <div>
+                  <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">
+                    <span>Top Boundary: <span id="lbl-court-top">20%</span></span>
+                  </div>
+                  <input type="range" id="slider-court-top" min="0" max="45" value="20" style="width: 100%; cursor: pointer;">
+                </div>
+                
+                <div>
+                  <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">
+                    <span>Bottom Boundary: <span id="lbl-court-bottom">90%</span></span>
+                  </div>
+                  <input type="range" id="slider-court-bottom" min="55" max="100" value="90" style="width: 100%; cursor: pointer;">
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -231,6 +289,23 @@
             </div>
             <div class="files-summary-text" id="files-summary-text">
               Total Duration: 0h 0m
+            </div>
+          </div>
+        </div>
+
+        <!-- Session Players Pool -->
+        <div class="sidebar-card card" id="players-card" style="display: none;">
+          <div class="card-header collapse-trigger" id="players-header">
+            <h3>Manage Players Pool (<span id="players-count">0</span>)</h3>
+            <span class="icon-toggle">▼</span>
+          </div>
+          <div class="card-body" id="players-body">
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+              <input type="text" id="input-new-player" placeholder="Enter player name" style="flex-grow: 1; padding: 6px 10px; font-size: 13px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-bright); border-radius: var(--radius-sm); outline: none;">
+              <button class="btn btn-primary btn-sm" id="btn-add-player" style="padding: 0 12px; font-weight: 700; height: 34px;">Add</button>
+            </div>
+            <div id="players-list-tags" style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <!-- JS populates tags here -->
             </div>
           </div>
         </div>
@@ -279,6 +354,9 @@
             </div>
             <button class="btn btn-accent btn-block btn-lg" id="btn-export-all">
               ⚡ Export Game Specific Videos
+            </button>
+            <button class="btn btn-block" id="btn-retry-failed-exports" style="display: none; margin-top: 10px; padding: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid #EF4444; color: #FCA5A5; font-weight: bold; border-radius: var(--radius-md); cursor: pointer;" title="Retry Exporting Failed Games">
+              🔄 Retry Failed Game Exports
             </button>
           </div>
         </div>

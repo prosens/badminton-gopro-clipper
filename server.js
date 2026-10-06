@@ -30,7 +30,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Helper to run exec as a promise
 function execPromise(command) {
   return new Promise((resolve, reject) => {
-    exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    exec(command, { maxBuffer: 1024 * 1024 * 10, stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout, stderr) => {
       if (error) {
         reject(error);
       } else {
@@ -116,7 +116,7 @@ app.get('/api/list-dirs', (req, res) => {
 app.get('/api/browse', (req, res) => {
   const script = `osascript -e 'POSIX path of (choose folder with prompt "Select your GoPro videos folder:")'`;
   
-  exec(script, (error, stdout, stderr) => {
+  exec(script, { stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout, stderr) => {
     if (error) {
       if (error.message.includes('-128')) {
         return res.json({ cancelled: true });
@@ -291,6 +291,41 @@ app.post('/api/scan', async (req, res) => {
 });
 
 /**
+ * Endpoint to auto-detect game boundaries based on motion analysis
+ */
+app.post('/api/auto-detect', async (req, res) => {
+  const { files, sampleInterval, crop } = req.body;
+
+  if (!files || !Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'List of video files is required for detection.' });
+  }
+
+  // Setup chunked response for streaming progress
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const sendProgress = (data) => {
+    res.write(JSON.stringify(data) + '\n');
+  };
+
+  try {
+    const { analyzeSession } = require('./motion-analyzer');
+    const interval = sampleInterval || 2;
+    const result = await analyzeSession(files, interval, crop, (progress) => {
+      sendProgress(progress);
+    });
+
+    sendProgress({ status: 'result', data: result });
+    res.end();
+  } catch (error) {
+    console.error('Auto-detection error:', error);
+    sendProgress({ status: 'error', message: error.message });
+    res.end();
+  }
+});
+
+
+/**
  * Custom range-based video streaming endpoint
  */
 app.get('/api/stream', (req, res) => {
@@ -366,7 +401,7 @@ app.post('/api/save-project', (req, res) => {
  */
 function spawnPromise(command, args, onLog) {
   return new Promise((resolve, reject) => {
-    const process = spawn(command, args);
+    const process = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let errorOutput = '';
 
     process.stdout.on('data', (data) => {
